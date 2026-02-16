@@ -7,18 +7,22 @@
 
 import { VisionBridge } from '../vision/bridge.mjs';
 
-const MODEL_ID = 'tsystems/colqwen2.5-3b-multilingual-v1.0-merged';
+const MODEL_IDS = {
+  torch: 'tsystems/colqwen2.5-3b-multilingual-v1.0-merged',
+  mlx: 'qnguyen3/colqwen2.5-v0.2-mlx',
+};
 const EMBEDDING_DIM = 128; // ColBERT-style 128-dim per token vector
 
-export function createVisionAdapter() {
+export function createVisionAdapter({ backend } = {}) {
   let bridge = null;
+  const resolvedBackend = backend || process.env.VISION_BACKEND || 'torch';
 
   return {
     name: 'colqwen25-vision',
     type: 'vision',
 
     async init() {
-      bridge = new VisionBridge();
+      bridge = new VisionBridge({ backend: resolvedBackend });
       await bridge.start();
     },
 
@@ -63,7 +67,7 @@ export function createVisionAdapter() {
     },
 
     modelId() {
-      return MODEL_ID;
+      return MODEL_IDS[resolvedBackend] || MODEL_IDS.torch;
     },
 
     /**

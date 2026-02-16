@@ -3,6 +3,12 @@
  *
  * Spawns the Python vision server as a child process,
  * communicates via JSON-RPC over stdin/stdout.
+ *
+ * Supports two backends:
+ *   - 'torch' (default): PyTorch + MPS via server.py + venv/
+ *   - 'mlx': Apple MLX via server_mlx.py + venv-mlx/
+ *
+ * Set VISION_BACKEND=mlx environment variable or pass { backend: 'mlx' } to constructor.
  */
 
 import { spawn } from 'child_process';
@@ -12,14 +18,23 @@ import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SERVER_SCRIPT = join(__dirname, 'server.py');
 
-// Find the venv python
-const VENV_DIR = join(__dirname, 'venv');
-const VENV_PYTHON = join(VENV_DIR, 'bin', 'python3');
+function getBackendPaths(backend) {
+  if (backend === 'mlx') {
+    return {
+      script: join(__dirname, 'server_mlx.py'),
+      venvPython: join(__dirname, 'venv-mlx', 'bin', 'python3'),
+    };
+  }
+  return {
+    script: join(__dirname, 'server.py'),
+    venvPython: join(__dirname, 'venv', 'bin', 'python3'),
+  };
+}
 
 export class VisionBridge {
-  constructor() {
+  constructor({ backend } = {}) {
+    this.backend = backend || process.env.VISION_BACKEND || 'torch';
     this.process = null;
     this.readline = null;
     this.requestId = 0;
@@ -35,9 +50,10 @@ export class VisionBridge {
   async start() {
     if (this.process) return;
 
-    const pythonBin = existsSync(VENV_PYTHON) ? VENV_PYTHON : 'python3';
+    const { script, venvPython } = getBackendPaths(this.backend);
+    const pythonBin = existsSync(venvPython) ? venvPython : 'python3';
 
-    this.process = spawn(pythonBin, [SERVER_SCRIPT], {
+    this.process = spawn(pythonBin, [script], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     });
@@ -197,7 +213,7 @@ export class VisionBridge {
 // Singleton instance
 let _bridge = null;
 
-export function getBridge() {
-  if (!_bridge) _bridge = new VisionBridge();
+export function getBridge({ backend } = {}) {
+  if (!_bridge) _bridge = new VisionBridge({ backend });
   return _bridge;
 }

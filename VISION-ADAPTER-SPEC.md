@@ -1,10 +1,11 @@
 # Vision Embedding Adapter — ColQwen2.5
 
-**Status:** :white_check_mark: Complete (S1–S7 implemented and tested)
+**Status:** :white_check_mark: Complete (S1–S7 implemented and tested, MLX backend added)
 **Parent:** `~/personal/retrieval-skill/`
 **Created:** 2026-02-15
 **Completed:** 2026-02-15
-**Hardware:** M3 Ultra, 256GB unified memory, macOS (MPS backend)
+**Updated:** 2026-02-16 (MLX backend port)
+**Hardware:** M3 Ultra, 256GB unified memory, macOS (MPS + MLX backends)
 
 ---
 
@@ -30,7 +31,8 @@ Add a **vision embedding pipeline** alongside the existing text pipeline in the 
 2. **Existing code untouched** — Octen text embedding, FTS5, chunking, RRF all stay as-is
 3. **Parallel indexing lanes** — text chunks and page image embeddings live in separate tables, searched independently, fused at query time
 4. **Model-agnostic** — adapter interface supports swapping models later
-5. **Python bridge** — ColQwen2.5 runs via transformers + torch; Node.js communicates via JSON-RPC over stdin/stdout
+5. **Python bridge** — ColQwen2.5 runs via transformers + torch (or MLX); Node.js communicates via JSON-RPC over stdin/stdout
+6. **Backend-agnostic** — supports both PyTorch+MPS and Apple MLX backends via `VISION_BACKEND` env var
 
 ## Architecture
 
@@ -126,19 +128,78 @@ User query
 - **Existing text pipeline verified:** all 19 original tests pass unchanged
 - **4 E2E tests pass, 36 total unit tests pass**
 
+### S8: MLX Backend Port :white_check_mark:
+
+Ported the vision embedding backend from PyTorch+MPS to Apple MLX for comparison.
+
+**Approach:**
+- Used `mlx-embeddings` v0.0.6 (from git main) which has native `colqwen2_5.py` model support
+- Used `qnguyen3/colqwen2.5-v0.2-mlx` pre-converted F16 weights (based on `vidore/colqwen2.5-v0.2`)
+- Replicated `colpali_engine`'s image/query processing in pure MLX:
+  - Image: `Qwen2VLImageProcessor` with `max_pixels=602112` + visual prompt prefix
+  - Query: text + 10x `<|endoftext|>` augmentation tokens
+- Same JSON-RPC protocol, same bridge interface — only the Python backend differs
+
+**Key findings:**
+- MLX weights are from `vidore/colqwen2.5-v0.2` (not `tsystems` merged variant) — same architecture (Qwen2.5-VL-3B + ColBERT projection), near-identical ViDoRe scores
+- `mlx-embeddings` colqwen2_5 model doesn't compute Qwen2.5-VL position IDs in its `__call__`; server_mlx.py manually calls `get_rope_index()` and passes `position_ids` through the language model
+- The `colvision_processor.py` (abstract base class) is on git main but has no concrete ColQwen2.5 processor — we implement the processing directly
+
+**MLX vs PyTorch Benchmark (M3 Ultra, 256GB, 1200x1600 synthetic page):**
+
+| Metric | PyTorch+MPS (float32) | MLX (float16) | Comparison |
+|---|---|---|---|
+| Model load (cached) | 5.2s | 1.0s | **MLX 5.2x faster** |
+| Query embedding (18 vecs) | 51ms | 30ms | **MLX 1.7x faster** |
+| Image embedding (779 vecs) | 1043ms | 3056ms | **Torch 2.9x faster** |
+| Batch 3 queries | 2026ms | 85ms | **MLX 23.7x faster** |
+| Peak memory | 6.5 GB | 7.6 GB | Torch 14% less |
+
+**Verdict:** MLX is viable as an alternative backend. It excels at query embedding (1.7x faster single, 24x faster batch) and model loading (5x faster). However, **image embedding is ~3x slower** than PyTorch+MPS, making it worse for bulk indexing. The MLX image embedding bottleneck is likely in the `mlx-vlm` vision tower implementation, which may improve as the library matures.
+
+**Recommendation:** Use MLX backend for search-heavy workloads (many queries, few new pages). Use PyTorch backend for indexing-heavy workloads (many new pages).
+
+**Files added:**
+- `src/vision/server_mlx.py` — MLX JSON-RPC server (drop-in replacement for server.py)
+- `src/vision/requirements-mlx.txt` — MLX Python deps
+- `src/vision/setup-mlx.sh` — MLX venv setup script
+- `src/vision/benchmark.py` — Benchmark script for both backends
+- `src/vision/venv-mlx/` — MLX Python virtual environment (gitignored)
+
+**Files modified:**
+- `src/vision/bridge.mjs` — Backend selection via `{ backend: 'mlx' }` or `VISION_BACKEND=mlx`
+- `src/adapters/vision-adapter.mjs` — Passes backend config through, reports correct model ID
+
+**Usage:**
+```bash
+# Setup MLX backend
+./src/vision/setup-mlx.sh
+
+# Use MLX for queries/search
+VISION_BACKEND=mlx retrieve search-vision "vegetarian pasta" --index skinnytaste
+
+# Use PyTorch for indexing (faster for bulk pages)
+retrieve index-vision ~/Downloads/cookbook.pdf
+```
+
 ## File Structure (Implemented)
 ```
 src/
 ├── adapters/
 │   ├── adapter.mjs          # EmbeddingAdapter interface + registry
 │   ├── text-adapter.mjs     # Wraps existing Octen embedder
-│   └── vision-adapter.mjs   # ColQwen2.5 via Python bridge
+│   └── vision-adapter.mjs   # ColQwen2.5 via Python bridge (backend-selectable)
 ├── vision/
-│   ├── server.py             # Python ColQwen2.5 JSON-RPC server
-│   ├── bridge.mjs            # Node.js ↔ Python bridge
-│   ├── requirements.txt      # Python deps
-│   ├── setup.sh              # Install + verify
-│   └── venv/                 # Python virtual environment (gitignored)
+│   ├── server.py             # PyTorch+MPS JSON-RPC server
+│   ├── server_mlx.py         # Apple MLX JSON-RPC server (S8)
+│   ├── bridge.mjs            # Node.js ↔ Python bridge (backend-selectable)
+│   ├── benchmark.py          # Benchmark script for both backends (S8)
+│   ├── requirements.txt      # PyTorch Python deps
+│   ├── requirements-mlx.txt  # MLX Python deps (S8)
+│   ├── setup.sh              # PyTorch venv setup
+│   ├── setup-mlx.sh          # MLX venv setup (S8)
+│   ├── venv/                 # PyTorch venv (gitignored)
+│   └── venv-mlx/             # MLX venv (gitignored)
 ├── search/
 │   └── maxsim.mjs            # MaxSim scoring for multi-vector
 ├── vision-index.mjs          # PDF vision indexing
@@ -158,12 +219,24 @@ __tests__/
 `~/Downloads/Skinnytaste meal prep gina homolka.pdf` — 276 pages, ~72MB. Used for E2E validation.
 
 ## Model Weights
-- **Used:** `tsystems/colqwen2.5-3b-multilingual-v1.0-merged` (merged variant, ~7GB)
+
+### PyTorch backend (default)
+- **Model:** `tsystems/colqwen2.5-3b-multilingual-v1.0-merged` (merged variant, ~7GB)
 - **Location:** `~/.cache/huggingface/hub/models--tsystems--colqwen2.5-3b-multilingual-v1.0-merged/`
-- **Note:** The existing `vidore/colqwen2-base` and `vidore/colqwen2-v1.0` weights are NOT used. ColQwen2.5 is a different model that uses Qwen2.5-VL-3B as its backbone (vs Qwen2-VL for the old ColQwen2).
-- **Dtype:** `from_pretrained(..., dtype=torch.float32)` — MPS does not support bfloat16
+- **Dtype:** float32 (MPS does not support bfloat16)
+
+### MLX backend
+- **Model:** `qnguyen3/colqwen2.5-v0.2-mlx` (converted from `vidore/colqwen2.5-v0.2`, F16)
+- **Location:** `~/.cache/huggingface/hub/models--qnguyen3--colqwen2.5-v0.2-mlx/`
+- **Dtype:** float16 (MLX native)
+- **Note:** Different training run (vidore v0.2 vs tsystems multilingual) but same architecture and near-identical ViDoRe benchmark scores (0.597 vs 0.599 nDCG@5)
+
+### Shared notes
+- The existing `vidore/colqwen2-base` and `vidore/colqwen2-v1.0` weights are NOT used. ColQwen2.5 is a different model that uses Qwen2.5-VL-3B as its backbone (vs Qwen2-VL for the old ColQwen2).
 
 ## Performance Benchmarks
+
+### Indexing (Skinnytaste PDF, 276 pages)
 
 | Metric | Value |
 |--------|-------|
@@ -171,12 +244,22 @@ __tests__/
 | Total vectors stored | 209,877 |
 | Avg vectors per page | ~760 |
 | Vector dimension | 128 |
-| Indexing time (full) | ~349s (~1.3 pages/sec) |
+| Indexing time (full, torch) | ~349s (~1.3 pages/sec) |
 | Model load time | ~2s (cached) |
 | Search latency (3 queries) | ~12.7s total (~4.2s/query) |
 | Incremental re-index | <1s (all skipped) |
-| Device | MPS (Apple Metal) |
-| Dtype | float32 |
+
+### Backend Comparison (M3 Ultra, 256GB, 1200x1600 synthetic page)
+
+| Metric | PyTorch+MPS (float32) | MLX (float16) |
+|---|---|---|
+| Model load (cached) | 5.2s | 1.0s |
+| Query embedding (18 vecs) | 51ms | 30ms |
+| Image embedding (779 vecs) | 1043ms | 3056ms |
+| Batch 3 queries | 2026ms | 85ms |
+| Peak memory | 6.5 GB | 7.6 GB |
+
+**Key takeaway:** MLX is 1.7-24x faster for queries but 3x slower for image embedding. Use MLX for search, PyTorch for indexing.
 
 ## Success Criteria
 
@@ -196,6 +279,13 @@ __tests__/
 - Query latency is dominated by model forward pass; could be improved with query vector caching
 - The hybrid success criterion requires running both text and vision on the same corpus (e.g., if there were markdown transcripts alongside the PDF)
 
+### MLX-specific notes
+- `mlx-embeddings` v0.0.5 (PyPI) / v0.0.6 (git main) has the ColQwen2.5 model but no concrete processor class — the server implements processing directly
+- The `colqwen2_5.py` model's `__call__` method doesn't compute `position_ids` correctly — server_mlx.py calls `get_rope_index()` manually and passes `position_ids` through the inner language model
+- `transformers` v5.x has a bug in `AutoProcessor.from_pretrained()` for Qwen2.5-VL (TypeError in video_processor detection) — worked around by loading `Qwen2VLImageProcessor` directly
+- The MLX image embedding slowdown is likely in `mlx-vlm`'s Qwen2.5-VL vision tower; this may improve with future `mlx-vlm` releases
+- MLX weights are float16 vs PyTorch float32; this contributes to the slightly higher memory usage despite smaller weight precision (numpy/mlx conversion overhead)
+
 ## References
 - Deep research report: Obsidian `OpenClaw/cooking/research/vision-embedding-sota-feb2026.md`
 - Original vision adapter spec: Obsidian `OpenClaw/cooking/research/retrieval-vision-adapter-spec.md`
@@ -204,3 +294,6 @@ __tests__/
 - ColQwen2 HF docs: https://huggingface.co/docs/transformers/en/model_doc/colqwen2
 - ColQwen2.5 model card: https://huggingface.co/tsystems/colqwen2.5-3b-multilingual-v1.0-merged
 - MPS bfloat16 workaround: use float32 or float16
+- mlx-embeddings: https://github.com/Blaizzy/mlx-embeddings
+- MLX ColQwen2.5 weights: https://huggingface.co/qnguyen3/colqwen2.5-v0.2-mlx
+- mlx-vlm (Qwen2.5-VL backbone): https://github.com/Blaizzy/mlx-vlm
