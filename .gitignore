@@ -1,0 +1,8 @@
+node_modules/
+indexes/
+models/
+*.db
+*.db-wal
+*.db-shm
+src/vision/venv/
+page-images/
