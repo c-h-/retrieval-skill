@@ -93,7 +93,12 @@ def embed_images(paths):
     results = []
     num_vectors = []
     for i in range(embeddings.shape[0]):
-        vecs = embeddings[i].cpu().float().numpy().tolist()
+        page_emb = embeddings[i].cpu().float()
+        # Replace NaN with 0.0 to avoid JSON serialization errors
+        if torch.isnan(page_emb).any():
+            sys.stderr.write(f"[vision-server] WARNING: NaN detected in embedding for image {i} ({paths[i]}), replacing with zeros\n")
+            page_emb = torch.nan_to_num(page_emb, nan=0.0)
+        vecs = page_emb.numpy().tolist()
         results.append(vecs)
         num_vectors.append(len(vecs))
 
