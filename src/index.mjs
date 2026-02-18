@@ -41,9 +41,19 @@ export async function indexDirectory(directory, name, opts = {}) {
   `);
   const updateMtime = db.prepare('UPDATE files SET mtime_ms = ? WHERE id = ?');
   const deleteFileChunks = db.prepare('DELETE FROM chunks WHERE file_id = ?');
-  const deleteFtsForFile = db.prepare(`
-    DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)
-  `);
+  // Contentless FTS5 tables don't support DELETE. Use the special 'delete' command.
+  const getChunksForFile = db.prepare(
+    'SELECT c.id, c.content, f.path FROM chunks c JOIN files f ON c.file_id = f.id WHERE c.file_id = ?'
+  );
+  const deleteFtsEntry = db.prepare(
+    "INSERT INTO chunks_fts(chunks_fts, rowid, content, file_path) VALUES('delete', ?, ?, ?)"
+  );
+  const deleteFtsForFile = (fileId) => {
+    const rows = getChunksForFile.all(fileId);
+    for (const row of rows) {
+      deleteFtsEntry.run(row.id, row.content, row.path);
+    }
+  };
   const insertChunk = db.prepare(`
     INSERT INTO chunks (file_id, chunk_index, content, embedding, content_hash, section_context)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -65,7 +75,7 @@ export async function indexDirectory(directory, name, opts = {}) {
   let pruned = 0;
   for (const dbFile of allDbPaths) {
     if (!filePathSet.has(dbFile.path)) {
-      deleteFtsForFile.run(dbFile.id);
+      deleteFtsForFile(dbFile.id);
       deleteFileChunks.run(dbFile.id);
       db.prepare('DELETE FROM files WHERE id = ?').run(dbFile.id);
       pruned++;
@@ -147,7 +157,7 @@ export async function indexDirectory(directory, name, opts = {}) {
       let fileId;
       if (existing) {
         // Delete old chunks + FTS entries
-        deleteFtsForFile.run(existing.id);
+        deleteFtsForFile(existing.id);
         deleteFileChunks.run(existing.id);
         updateFile.run(contentHash, file.size, file.mtimeMs, now, metadata, existing.id);
         fileId = existing.id;
