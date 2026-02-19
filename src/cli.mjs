@@ -46,14 +46,18 @@ program
   .option('--top-k <n>', 'Number of results', '10')
   .option('--threshold <score>', 'Minimum score threshold', '0')
   .option('--mode <mode>', 'Search mode: text (default), vision, hybrid', 'text')
+  .option('--recency-weight <n>', 'Recency weight (0 to disable, default 0.15)', '0.15')
+  .option('--half-life <days>', 'Recency half-life in days (default 90)', '90')
   .option('--json', 'Output as JSON')
   .action(async (query, opts) => {
     const indexNames = opts.index.split(',').map(s => s.trim());
     const topK = parseInt(opts.topK, 10);
     const threshold = parseFloat(opts.threshold);
     const mode = opts.mode;
+    const recencyWeight = parseFloat(opts.recencyWeight);
+    const halfLifeDays = parseFloat(opts.halfLife);
 
-    const results = await search(query, indexNames, { topK, threshold, mode });
+    const results = await search(query, indexNames, { topK, threshold, mode, recencyWeight, halfLifeDays });
 
     if (opts.json) {
       console.log(formatResultsJson(results));

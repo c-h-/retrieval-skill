@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'fs';
 import { dirname } from 'path';
 
-const SCHEMA_VERSION = 3; // v3: added vision tables (page_images, page_vectors)
+const SCHEMA_VERSION = 4; // v4: added content_timestamp_ms to chunks
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   embedding BLOB NOT NULL,
   content_hash TEXT NOT NULL,
   section_context TEXT,
+  content_timestamp_ms INTEGER,
   UNIQUE(file_id, chunk_index)
 );
 
@@ -86,10 +87,21 @@ export function openDb(dbPath, { vision = false } = {}) {
   const existing = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version');
   if (!existing) {
     db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('schema_version', String(SCHEMA_VERSION));
-  } else if (vision && parseInt(existing.value) < 3) {
-    // Upgrade existing DB to include vision tables
-    db.exec(VISION_SCHEMA_SQL);
-    db.prepare('UPDATE meta SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION), 'schema_version');
+  } else {
+    const ver = parseInt(existing.value);
+    if (vision && ver < 3) {
+      db.exec(VISION_SCHEMA_SQL);
+    }
+    if (ver < 4) {
+      // v4 migration: add content_timestamp_ms column to chunks
+      const cols = db.pragma('table_info(chunks)').map(c => c.name);
+      if (!cols.includes('content_timestamp_ms')) {
+        db.exec('ALTER TABLE chunks ADD COLUMN content_timestamp_ms INTEGER');
+      }
+    }
+    if (ver < SCHEMA_VERSION) {
+      db.prepare('UPDATE meta SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION), 'schema_version');
+    }
   }
 
   return db;

@@ -6,6 +6,40 @@ import { createVisionAdapter } from './adapters/vision-adapter.mjs';
 import { relative } from 'path';
 
 /**
+ * Compute a recency multiplier for a content timestamp.
+ * Returns a value in (0, 1] — recent content scores higher.
+ * Null timestamp → 1.0 (no boost or penalty).
+ *
+ * @param {number|null} contentTimestampMs
+ * @param {number} halfLifeDays
+ * @returns {number}
+ */
+export function recencyBoost(contentTimestampMs, halfLifeDays = 90) {
+  if (contentTimestampMs == null) return 1.0;
+  const ageDays = (Date.now() - contentTimestampMs) / 86_400_000;
+  if (ageDays <= 0) return 1.0;
+  return 1 / (1 + ageDays / halfLifeDays);
+}
+
+/**
+ * Format a relative age string from a timestamp.
+ * Returns e.g. "2d ago", "3mo ago", "1y ago", or null.
+ */
+export function relativeAge(timestampMs) {
+  if (timestampMs == null) return null;
+  const diffMs = Date.now() - timestampMs;
+  if (diffMs < 0) return 'just now';
+  const days = Math.floor(diffMs / 86_400_000);
+  if (days === 0) return 'today';
+  if (days === 1) return '1d ago';
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  const years = Math.floor(days / 365);
+  return `${years}y ago`;
+}
+
+/**
  * Cosine similarity between two normalized Float32Arrays (= dot product).
  */
 function cosine(a, b) {
@@ -50,7 +84,7 @@ function rrfFuse(rankedLists, k = 60) {
  * Returns array of results sorted by hybrid score.
  * This is the ORIGINAL text search — unchanged behavior when mode='text'.
  */
-function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir) {
+function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts = {}) {
   // Step 1: FTS5 keyword search for candidate IDs
   const ftsQueryStr = ftsQuery(query);
   let ftsRows = [];
@@ -73,7 +107,7 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir) {
   // Step 2: Get all chunks for vector scoring
   // For small-to-medium indexes (<100K chunks), full scan is fast enough
   const allChunks = db.prepare(
-    'SELECT c.id, c.file_id, c.chunk_index, c.content, c.embedding, c.section_context, f.path, f.metadata FROM chunks c JOIN files f ON c.file_id = f.id'
+    'SELECT c.id, c.file_id, c.chunk_index, c.content, c.embedding, c.section_context, c.content_timestamp_ms, f.path, f.metadata FROM chunks c JOIN files f ON c.file_id = f.id'
   ).all();
 
   // Step 3: Score all chunks
@@ -87,9 +121,16 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir) {
     // Hybrid: 60% vector + 40% FTS
     const hybrid = vecScore * 0.6 + normalizedFts * 0.4;
 
+    // Apply recency boost: finalScore = semantic * (1 - w + w * boost)
+    const recencyWeight = opts.recencyWeight ?? 0;
+    const halfLifeDays = opts.halfLifeDays ?? 90;
+    const boost = recencyBoost(row.content_timestamp_ms, halfLifeDays);
+    const finalScore = hybrid * (1 - recencyWeight + recencyWeight * boost);
+
     scored.push({
       content: row.content,
-      score: hybrid,
+      score: finalScore,
+      semanticScore: hybrid,
       vecScore,
       ftsScore: normalizedFts,
       filePath: row.path,
@@ -98,6 +139,7 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir) {
       metadata: row.metadata ? JSON.parse(row.metadata) : null,
       indexName,
       chunkIndex: row.chunk_index,
+      contentTimestampMs: row.content_timestamp_ms,
       resultType: 'text',
     });
   }
@@ -122,6 +164,8 @@ export async function search(query, indexNames, opts = {}) {
   const topK = opts.topK || 10;
   const threshold = opts.threshold || 0;
   const mode = opts.mode || 'text';
+  const recencyWeight = opts.recencyWeight ?? 0.15;
+  const halfLifeDays = opts.halfLifeDays ?? 90;
 
   // --- Text lane ---
   let textResults = [];
@@ -139,7 +183,7 @@ export async function search(query, indexNames, opts = {}) {
       }
 
       const sourceDir = getMeta(db, 'source_directory');
-      const results = searchIndex(db, queryEmbedding, query, topK * 2, name, sourceDir);
+      const results = searchIndex(db, queryEmbedding, query, topK * 2, name, sourceDir, { recencyWeight, halfLifeDays });
       textResults.push(...results);
       db.close();
     }
@@ -304,7 +348,9 @@ export function formatResults(results, query) {
     const displayPath = r.relativePath || r.filePath;
     const ctx = r.sectionContext ? ` § ${r.sectionContext}` : '';
     const typeTag = r.resultType === 'vision' ? ' [vision]' : '';
-    lines.push(`[${r.score.toFixed(3)}] ${r.indexName}/${displayPath}${ctx}${typeTag}`);
+    const age = relativeAge(r.contentTimestampMs);
+    const scorePart = age ? `${r.score.toFixed(2)} | ${age}` : r.score.toFixed(3);
+    lines.push(`[${scorePart}] ${r.indexName}/${displayPath}${ctx}${typeTag}`);
 
     // Show snippet (first 200 chars)
     const snippet = (r.content || '').replace(/\n/g, ' ').slice(0, 200);
@@ -319,6 +365,7 @@ export function formatResults(results, query) {
 export function formatResultsJson(results) {
   return JSON.stringify(results.map(r => ({
     score: r.score,
+    semanticScore: r.semanticScore,
     rrfScore: r.rrfScore,
     vecScore: r.vecScore,
     ftsScore: r.ftsScore,
@@ -328,6 +375,7 @@ export function formatResultsJson(results) {
     sectionContext: r.sectionContext,
     content: r.content,
     metadata: r.metadata,
+    contentTimestampMs: r.contentTimestampMs,
     resultType: r.resultType || 'text',
     pageNumber: r.pageNumber,
     sourcePath: r.sourcePath,
