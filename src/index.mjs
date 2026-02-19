@@ -1,6 +1,6 @@
 import { openDb, setMeta, getMeta } from './schema.mjs';
 import { walkFiles, readFileContent, sha256, chunkHash } from './utils.mjs';
-import { chunkDocument, parseFrontmatter, extractMetadata } from './chunker.mjs';
+import { chunkDocument, parseFrontmatter, extractMetadata, extractContentTimestamp } from './chunker.mjs';
 import { embedDocuments, embeddingToBlob, getModelId } from './embedder.mjs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -55,8 +55,8 @@ export async function indexDirectory(directory, name, opts = {}) {
     }
   };
   const insertChunk = db.prepare(`
-    INSERT INTO chunks (file_id, chunk_index, content, embedding, content_hash, section_context)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO chunks (file_id, chunk_index, content, embedding, content_hash, section_context, content_timestamp_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   const insertFts = db.prepare(`
     INSERT INTO chunks_fts (rowid, content, file_path) VALUES (?, ?, ?)
@@ -120,6 +120,7 @@ export async function indexDirectory(directory, name, opts = {}) {
     // Content changed → re-index
     const { frontmatter } = parseFrontmatter(content);
     const metadata = extractMetadata(frontmatter);
+    const contentTimestampMs = extractContentTimestamp(frontmatter, file.mtimeMs);
     const chunks = chunkDocument(content);
 
     if (chunks.length === 0) {
@@ -172,7 +173,7 @@ export async function indexDirectory(directory, name, opts = {}) {
           ? embeddings[ci]
           : embeddingToBlob(embeddings[ci]);
         const result = insertChunk.run(
-          fileId, ci, chunks[ci].content, embBlob, hash, chunks[ci].sectionContext
+          fileId, ci, chunks[ci].content, embBlob, hash, chunks[ci].sectionContext, contentTimestampMs
         );
         insertFts.run(result.lastInsertRowid, chunks[ci].content, file.path);
       }

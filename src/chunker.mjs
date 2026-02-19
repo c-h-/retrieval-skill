@@ -166,6 +166,50 @@ export function chunkDocument(rawContent) {
 }
 
 /**
+ * Priority-ordered frontmatter fields for content timestamps.
+ */
+const TIMESTAMP_FIELDS = [
+  'last_edited_time', 'updatedAt', 'updated_at', 'last_edited',
+  'createdAt', 'created_at', 'created_time', 'date', 'last-reviewed',
+];
+
+/**
+ * Extract the best content timestamp from frontmatter or fall back to file mtime.
+ * Returns epoch milliseconds or null.
+ *
+ * @param {object|null} frontmatter
+ * @param {number|null} mtimeMs - file modification time in ms
+ * @returns {number|null}
+ */
+export function extractContentTimestamp(frontmatter, mtimeMs = null) {
+  if (frontmatter) {
+    for (const field of TIMESTAMP_FIELDS) {
+      const val = frontmatter[field];
+      if (val == null) continue;
+      const ms = parseTimestamp(val);
+      if (ms !== null) return ms;
+    }
+  }
+  return mtimeMs != null ? Math.floor(mtimeMs) : null;
+}
+
+/**
+ * Parse a timestamp value (ISO string, date string, or epoch number) to ms.
+ * Returns number or null on failure.
+ */
+function parseTimestamp(val) {
+  if (typeof val === 'number') {
+    // Already epoch ms (or seconds — heuristic: if < 1e12, treat as seconds)
+    return val < 1e12 ? val * 1000 : val;
+  }
+  if (typeof val === 'string') {
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) return d.getTime();
+  }
+  return null;
+}
+
+/**
  * Extract metadata JSON from frontmatter for storage.
  */
 export function extractMetadata(frontmatter) {
