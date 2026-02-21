@@ -1,10 +1,10 @@
-import { openDb, setMeta, getMeta } from './schema.mjs';
-import { walkFiles, readFileContent, sha256, chunkHash } from './utils.mjs';
-import { chunkDocument, parseFrontmatter, extractMetadata, extractContentTimestamp } from './chunker.mjs';
-import { embedDocuments, embeddingToBlob, getModelId } from './embedder.mjs';
-import { join } from 'path';
+import { existsSync, readdirSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
-import { readdirSync, existsSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { chunkDocument, extractContentTimestamp, extractMetadata, parseFrontmatter } from './chunker.mjs';
+import { embedDocuments, embeddingToBlob, getModelId } from './embedder.mjs';
+import { getMeta, openDb, setMeta } from './schema.mjs';
+import { chunkHash, readFileContent, sha256, walkFiles } from './utils.mjs';
 
 const DEFAULT_INDEX_DIR = join(homedir(), '.retrieval-skill', 'indexes');
 
@@ -19,7 +19,7 @@ export function indexDbPath(name) {
  * Index a directory into a named index.
  * Supports incremental updates: only re-embeds changed files.
  */
-export async function indexDirectory(directory, name, opts = {}) {
+export async function indexDirectory(directory, name, _opts = {}) {
   const dbPath = indexDbPath(name);
   const db = openDb(dbPath);
   const modelId = getModelId();
@@ -43,10 +43,10 @@ export async function indexDirectory(directory, name, opts = {}) {
   const deleteFileChunks = db.prepare('DELETE FROM chunks WHERE file_id = ?');
   // Contentless FTS5 tables don't support DELETE. Use the special 'delete' command.
   const getChunksForFile = db.prepare(
-    'SELECT c.id, c.content, f.path FROM chunks c JOIN files f ON c.file_id = f.id WHERE c.file_id = ?'
+    'SELECT c.id, c.content, f.path FROM chunks c JOIN files f ON c.file_id = f.id WHERE c.file_id = ?',
   );
   const deleteFtsEntry = db.prepare(
-    "INSERT INTO chunks_fts(chunks_fts, rowid, content, file_path) VALUES('delete', ?, ?, ?)"
+    "INSERT INTO chunks_fts(chunks_fts, rowid, content, file_path) VALUES('delete', ?, ?, ?)",
   );
   const deleteFtsForFile = (fileId) => {
     const rows = getChunksForFile.all(fileId);
@@ -69,7 +69,7 @@ export async function indexDirectory(directory, name, opts = {}) {
   const files = await walkFiles(directory);
   console.error(`Found ${files.length} files.`);
 
-  const filePathSet = new Set(files.map(f => f.path));
+  const filePathSet = new Set(files.map((f) => f.path));
 
   // Dead file pruning: delete DB entries for files no longer on disk
   let pruned = 0;
@@ -169,11 +169,15 @@ export async function indexDirectory(directory, name, opts = {}) {
 
       for (let ci = 0; ci < chunks.length; ci++) {
         const hash = chunkHash(chunks[ci].content, modelId);
-        const embBlob = embeddings[ci] instanceof Buffer
-          ? embeddings[ci]
-          : embeddingToBlob(embeddings[ci]);
+        const embBlob = embeddings[ci] instanceof Buffer ? embeddings[ci] : embeddingToBlob(embeddings[ci]);
         const result = insertChunk.run(
-          fileId, ci, chunks[ci].content, embBlob, hash, chunks[ci].sectionContext, contentTimestampMs
+          fileId,
+          ci,
+          chunks[ci].content,
+          embBlob,
+          hash,
+          chunks[ci].sectionContext,
+          contentTimestampMs,
         );
         insertFts.run(result.lastInsertRowid, chunks[ci].content, file.path);
       }
@@ -207,8 +211,8 @@ export function listIndexes() {
   if (!existsSync(DEFAULT_INDEX_DIR)) return [];
 
   return readdirSync(DEFAULT_INDEX_DIR)
-    .filter(f => f.endsWith('.db'))
-    .map(f => {
+    .filter((f) => f.endsWith('.db'))
+    .map((f) => {
       const name = f.replace('.db', '');
       const dbPath = join(DEFAULT_INDEX_DIR, f);
       try {
@@ -258,4 +262,3 @@ export function deleteIndex(name) {
     if (existsSync(p)) unlinkSync(p);
   }
 }
-

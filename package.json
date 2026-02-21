@@ -32,14 +32,19 @@
   "bin": {
     "retrieve": "./src/cli.mjs"
   },
+  "types": "./types/index.d.ts",
   "files": [
     "src/",
+    "types/",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "biome check src/ __tests__/",
+    "lint:fix": "biome check --write src/ __tests__/",
+    "format": "biome format --write src/ __tests__/"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.0",
@@ -47,6 +52,7 @@
     "yaml": "^2.7.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
     "vitest": "^3.0.0"
   }
 }

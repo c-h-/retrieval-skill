@@ -56,6 +56,13 @@ export function createVisionAdapter({ backend } = {}) {
     },
 
     /**
+     * Extract text from PDF pages (PyMuPDF + optional pytesseract OCR fallback).
+     */
+    async extractText(pdfPath) {
+      return bridge.extractText(pdfPath);
+    },
+
+    /**
      * Get number of vectors per result. Useful post-embedding.
      */
     async embedImagesWithMeta(imagePaths) {

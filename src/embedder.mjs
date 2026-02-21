@@ -27,12 +27,20 @@ async function callServer(texts, retries = 3) {
       }
       const json = await res.json();
       const sorted = json.data.sort((a, b) => a.index - b.index);
-      return sorted.map(d => new Float32Array(d.embedding));
+      return sorted.map((d) => new Float32Array(d.embedding));
     } catch (err) {
-      if (attempt < retries && (err.code === 'UND_ERR_SOCKET' || err.cause?.code === 'UND_ERR_SOCKET' || err.message.includes('socket') || err.message.includes('ECONNRESET'))) {
+      if (
+        attempt < retries &&
+        (err.code === 'UND_ERR_SOCKET' ||
+          err.cause?.code === 'UND_ERR_SOCKET' ||
+          err.message.includes('socket') ||
+          err.message.includes('ECONNRESET'))
+      ) {
         const delay = attempt * 2000;
-        console.error(`Embedding request failed (attempt ${attempt}/${retries}), retrying in ${delay}ms: ${err.message}`);
-        await new Promise(r => setTimeout(r, delay));
+        console.error(
+          `Embedding request failed (attempt ${attempt}/${retries}), retrying in ${delay}ms: ${err.message}`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
         continue;
       }
       throw err;

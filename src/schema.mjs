@@ -88,13 +88,13 @@ export function openDb(dbPath, { vision = false } = {}) {
   if (!existing) {
     db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('schema_version', String(SCHEMA_VERSION));
   } else {
-    const ver = parseInt(existing.value);
+    const ver = parseInt(existing.value, 10);
     if (vision && ver < 3) {
       db.exec(VISION_SCHEMA_SQL);
     }
     if (ver < 4) {
       // v4 migration: add content_timestamp_ms column to chunks
-      const cols = db.pragma('table_info(chunks)').map(c => c.name);
+      const cols = db.pragma('table_info(chunks)').map((c) => c.name);
       if (!cols.includes('content_timestamp_ms')) {
         db.exec('ALTER TABLE chunks ADD COLUMN content_timestamp_ms INTEGER');
       }

@@ -76,11 +76,11 @@ export function searchVisionIndex(db, queryVectors, topK = 10) {
 
   for (const page of pages) {
     // Load all vectors for this page
-    const vectorRows = db.prepare(
-      'SELECT embedding FROM page_vectors WHERE page_image_id = ? ORDER BY vector_index'
-    ).all(page.id);
+    const vectorRows = db
+      .prepare('SELECT embedding FROM page_vectors WHERE page_image_id = ? ORDER BY vector_index')
+      .all(page.id);
 
-    const pageVectors = vectorRows.map(row => {
+    const pageVectors = vectorRows.map((row) => {
       const buf = row.embedding;
       return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
     });

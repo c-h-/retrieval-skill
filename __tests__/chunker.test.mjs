@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { parseFrontmatter, extractTitle, splitSections, chunkDocument } from '../src/chunker.mjs';
 import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { describe, expect, it } from 'vitest';
+import { chunkDocument, extractTitle, parseFrontmatter, splitSections } from '../src/chunker.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => readFileSync(join(__dirname, 'fixtures', name), 'utf-8');
@@ -103,7 +103,7 @@ describe('chunkDocument', () => {
     const content = fixture('sample-issue.md');
     const chunks = chunkDocument(content);
     // Comments section splits into individual ### headings (Charlie, Sarah)
-    const charlieChunk = chunks.find(c => c.sectionContext && c.sectionContext.includes('Charlie'));
+    const charlieChunk = chunks.find((c) => c.sectionContext?.includes('Charlie'));
     expect(charlieChunk).toBeTruthy();
     // All chunks should include the document title
     expect(chunks[0].sectionContext).toContain('Fix auth token refresh');

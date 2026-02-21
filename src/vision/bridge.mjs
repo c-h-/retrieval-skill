@@ -12,10 +12,10 @@
  */
 
 import { spawn } from 'child_process';
-import { createInterface } from 'readline';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
+import { dirname, join } from 'path';
+import { createInterface } from 'readline';
+import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -95,7 +95,7 @@ export class VisionBridge {
       console.error(`[vision-bridge] Python process exited with code ${code}`);
       this.ready = false;
       // Reject any pending requests
-      for (const [id, { reject }] of this.pending) {
+      for (const [_id, { reject }] of this.pending) {
         reject(new Error(`Vision server exited (code ${code})`));
       }
       this.pending.clear();
@@ -139,7 +139,7 @@ export class VisionBridge {
 
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.process.stdin.write(req + '\n');
+      this.process.stdin.write(`${req}\n`);
     });
   }
 
@@ -156,9 +156,7 @@ export class VisionBridge {
     const result = await this._call('embed_images', { paths });
     // Convert nested arrays to Float32Arrays
     return {
-      embeddings: result.embeddings.map(pageVecs =>
-        pageVecs.map(vec => new Float32Array(vec))
-      ),
+      embeddings: result.embeddings.map((pageVecs) => pageVecs.map((vec) => new Float32Array(vec))),
       num_vectors: result.num_vectors,
     };
   }
@@ -169,7 +167,7 @@ export class VisionBridge {
    */
   async embedQuery(text) {
     const result = await this._call('embed_query', { text });
-    return result.embedding.map(vec => new Float32Array(vec));
+    return result.embedding.map((vec) => new Float32Array(vec));
   }
 
   /**
@@ -178,9 +176,7 @@ export class VisionBridge {
    */
   async embedQueries(texts) {
     const result = await this._call('embed_queries', { texts });
-    return result.embeddings.map(queryVecs =>
-      queryVecs.map(vec => new Float32Array(vec))
-    );
+    return result.embeddings.map((queryVecs) => queryVecs.map((vec) => new Float32Array(vec)));
   }
 
   /**
@@ -189,6 +185,15 @@ export class VisionBridge {
    */
   async extractPages(pdfPath, outputDir) {
     return this._call('extract_pages', { pdf_path: pdfPath, output_dir: outputDir });
+  }
+
+  /**
+   * Extract text from each page of a PDF.
+   * Uses PyMuPDF text extraction, with pytesseract OCR fallback for image-only pages.
+   * Returns { pages: Array<{ page_number, text, method }>, has_tesseract: boolean }
+   */
+  async extractText(pdfPath) {
+    return this._call('extract_text', { pdf_path: pdfPath });
   }
 
   /**

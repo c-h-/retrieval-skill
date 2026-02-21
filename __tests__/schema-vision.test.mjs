@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { openDb, getMeta, setMeta } from '../src/schema.mjs';
-import { existsSync, unlinkSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { existsSync, mkdirSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
+import { join } from 'path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { getMeta, openDb } from '../src/schema.mjs';
 
 const TEST_DB_DIR = join(tmpdir(), 'retrieval-test-vision');
 
@@ -30,10 +30,8 @@ describe('schema vision tables', () => {
     const db = openDb(dbPath, { vision: true });
 
     // Verify page_images table exists
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    ).all();
-    const tableNames = tables.map(t => t.name);
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all();
+    const tableNames = tables.map((t) => t.name);
     expect(tableNames).toContain('page_images');
     expect(tableNames).toContain('page_vectors');
 
@@ -44,10 +42,8 @@ describe('schema vision tables', () => {
     dbPath = testDbPath('vision-test-2');
     const db = openDb(dbPath);
 
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    ).all();
-    const tableNames = tables.map(t => t.name);
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all();
+    const tableNames = tables.map((t) => t.name);
     expect(tableNames).not.toContain('page_images');
     expect(tableNames).not.toContain('page_vectors');
 
@@ -77,14 +73,26 @@ describe('schema vision tables', () => {
     // Insert vectors
     const embedding = new Float32Array([0.1, 0.2, 0.3, 0.4]);
     const blob = Buffer.from(embedding.buffer);
-    db.prepare('INSERT INTO page_vectors (page_image_id, vector_index, embedding) VALUES (?, ?, ?)').run(page.id, 0, blob);
-    db.prepare('INSERT INTO page_vectors (page_image_id, vector_index, embedding) VALUES (?, ?, ?)').run(page.id, 1, blob);
+    db.prepare('INSERT INTO page_vectors (page_image_id, vector_index, embedding) VALUES (?, ?, ?)').run(
+      page.id,
+      0,
+      blob,
+    );
+    db.prepare('INSERT INTO page_vectors (page_image_id, vector_index, embedding) VALUES (?, ?, ?)').run(
+      page.id,
+      1,
+      blob,
+    );
 
     const vectors = db.prepare('SELECT * FROM page_vectors WHERE page_image_id = ?').all(page.id);
     expect(vectors.length).toBe(2);
 
     // Verify BLOB roundtrip
-    const readBack = new Float32Array(vectors[0].embedding.buffer, vectors[0].embedding.byteOffset, vectors[0].embedding.byteLength / 4);
+    const readBack = new Float32Array(
+      vectors[0].embedding.buffer,
+      vectors[0].embedding.byteOffset,
+      vectors[0].embedding.byteLength / 4,
+    );
     expect(readBack[0]).toBeCloseTo(0.1);
     expect(readBack[3]).toBeCloseTo(0.4);
 
@@ -102,7 +110,11 @@ describe('schema vision tables', () => {
 
     const page = db.prepare('SELECT id FROM page_images WHERE document_id = ?').get('doc456');
     const blob = Buffer.from(new Float32Array([1, 2, 3, 4]).buffer);
-    db.prepare('INSERT INTO page_vectors (page_image_id, vector_index, embedding) VALUES (?, ?, ?)').run(page.id, 0, blob);
+    db.prepare('INSERT INTO page_vectors (page_image_id, vector_index, embedding) VALUES (?, ?, ?)').run(
+      page.id,
+      0,
+      blob,
+    );
 
     // Delete the page
     db.prepare('DELETE FROM page_images WHERE id = ?').run(page.id);
@@ -119,15 +131,13 @@ describe('schema vision tables', () => {
 
     // First open without vision
     let db = openDb(dbPath);
-    const v1 = getMeta(db, 'schema_version');
+    const _v1 = getMeta(db, 'schema_version');
     db.close();
 
     // Re-open with vision
     db = openDb(dbPath, { vision: true });
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    ).all();
-    const tableNames = tables.map(t => t.name);
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all();
+    const tableNames = tables.map((t) => t.name);
     expect(tableNames).toContain('page_images');
     expect(tableNames).toContain('page_vectors');
 

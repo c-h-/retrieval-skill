@@ -135,6 +135,45 @@ def extract_pages(pdf_path, output_dir):
     return {"paths": paths, "page_count": len(paths)}
 
 
+def extract_text(pdf_path):
+    """Extract text content from each page of a PDF using PyMuPDF.
+    For pages with no embedded text (image-only), attempts OCR via pytesseract if available.
+    Returns list of { page_number, text, method } objects."""
+    doc = fitz.open(pdf_path)
+    pages = []
+    has_tesseract = False
+    try:
+        import pytesseract
+        has_tesseract = True
+    except ImportError:
+        pass
+
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        text = page.get_text().strip()
+        method = "pymupdf"
+
+        if not text and has_tesseract:
+            # OCR fallback for image-only pages
+            try:
+                pix = page.get_pixmap(dpi=300)
+                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                text = pytesseract.image_to_string(img).strip()
+                method = "tesseract"
+            except Exception as e:
+                log(f"OCR failed on page {page_num}: {e}")
+                method = "ocr_failed"
+
+        pages.append({
+            "page_number": page_num,
+            "text": text,
+            "method": method,
+        })
+
+    doc.close()
+    return {"pages": pages, "has_tesseract": has_tesseract}
+
+
 def handle_request(req):
     """Route a JSON-RPC request to the appropriate handler."""
     method = req.get("method")
@@ -162,6 +201,9 @@ def handle_request(req):
         return {"id": req_id, "result": result}
     elif method == "extract_pages":
         result = extract_pages(params["pdf_path"], params["output_dir"])
+        return {"id": req_id, "result": result}
+    elif method == "extract_text":
+        result = extract_text(params["pdf_path"])
         return {"id": req_id, "result": result}
     elif method == "shutdown":
         return {"id": req_id, "result": {"status": "shutting_down"}}
