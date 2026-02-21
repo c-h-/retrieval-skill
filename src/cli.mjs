@@ -48,6 +48,7 @@ program
   .option('--mode <mode>', 'Search mode: text (default), vision, hybrid', 'text')
   .option('--recency-weight <n>', 'Recency weight (0 to disable, default 0.15)', '0.15')
   .option('--half-life <days>', 'Recency half-life in days (default 90)', '90')
+  .option('--filter <key=value>', 'Metadata filter as key=value (repeatable)', (val, acc) => { acc.push(val); return acc; }, [])
   .option('--json', 'Output as JSON')
   .action(async (query, opts) => {
     const indexNames = opts.index.split(',').map(s => s.trim());
@@ -57,7 +58,21 @@ program
     const recencyWeight = parseFloat(opts.recencyWeight);
     const halfLifeDays = parseFloat(opts.halfLife);
 
-    const results = await search(query, indexNames, { topK, threshold, mode, recencyWeight, halfLifeDays });
+    // Parse metadata filters from --filter key=value pairs
+    let filters = null;
+    if (opts.filter && opts.filter.length > 0) {
+      filters = {};
+      for (const f of opts.filter) {
+        const eqIdx = f.indexOf('=');
+        if (eqIdx === -1) {
+          console.error(`Warning: Invalid filter "${f}" — expected key=value format`);
+          continue;
+        }
+        filters[f.slice(0, eqIdx)] = f.slice(eqIdx + 1);
+      }
+    }
+
+    const results = await search(query, indexNames, { topK, threshold, mode, recencyWeight, halfLifeDays, filters });
 
     if (opts.json) {
       console.log(formatResultsJson(results));

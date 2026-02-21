@@ -80,11 +80,39 @@ function rrfFuse(rankedLists, k = 60) {
 }
 
 /**
+ * Check if a metadata JSON object matches all filter conditions.
+ * Each filter key must exist in the metadata and match the filter value.
+ * Filter values are compared as strings (case-insensitive).
+ *
+ * @param {string|null} metadataJson - JSON string from the files table
+ * @param {Object} filters - key-value pairs to match
+ * @returns {boolean}
+ */
+export function matchesFilters(metadataJson, filters) {
+  if (!filters || Object.keys(filters).length === 0) return true;
+  if (!metadataJson) return false;
+  let meta;
+  try {
+    meta = JSON.parse(metadataJson);
+  } catch {
+    return false;
+  }
+  for (const [key, value] of Object.entries(filters)) {
+    const metaVal = meta[key];
+    if (metaVal == null) return false;
+    if (String(metaVal).toLowerCase() !== String(value).toLowerCase()) return false;
+  }
+  return true;
+}
+
+/**
  * Search a single index database (text pipeline only).
  * Returns array of results sorted by hybrid score.
  * This is the ORIGINAL text search — unchanged behavior when mode='text'.
  */
 function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts = {}) {
+  const filters = opts.filters || null;
+
   // Step 1: FTS5 keyword search for candidate IDs
   const ftsQueryStr = ftsQuery(query);
   let ftsRows = [];
@@ -113,6 +141,9 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts
   // Step 3: Score all chunks
   const scored = [];
   for (const row of allChunks) {
+    // Apply metadata filters before expensive vector operations
+    if (!matchesFilters(row.metadata, filters)) continue;
+
     const vec = blobToEmbedding(row.embedding);
     const vecScore = cosine(queryEmbedding, vec);
     const ftsScore = ftsScores.get(row.id) || 0;
@@ -159,6 +190,7 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts
  * @param {number} opts.topK - default 10
  * @param {number} opts.threshold - default 0
  * @param {string} opts.mode - 'text' (default) | 'vision' | 'hybrid'
+ * @param {Object} opts.filters - metadata key-value filters (e.g. { source: 'slack', status: 'open' })
  */
 export async function search(query, indexNames, opts = {}) {
   const topK = opts.topK || 10;
@@ -166,6 +198,7 @@ export async function search(query, indexNames, opts = {}) {
   const mode = opts.mode || 'text';
   const recencyWeight = opts.recencyWeight ?? 0.15;
   const halfLifeDays = opts.halfLifeDays ?? 90;
+  const filters = opts.filters || null;
 
   // --- Text lane ---
   let textResults = [];
@@ -183,7 +216,7 @@ export async function search(query, indexNames, opts = {}) {
       }
 
       const sourceDir = getMeta(db, 'source_directory');
-      const results = searchIndex(db, queryEmbedding, query, topK * 2, name, sourceDir, { recencyWeight, halfLifeDays });
+      const results = searchIndex(db, queryEmbedding, query, topK * 2, name, sourceDir, { recencyWeight, halfLifeDays, filters });
       textResults.push(...results);
       db.close();
     }
