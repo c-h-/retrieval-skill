@@ -8,3 +8,6 @@ src/vision/venv/
 src/vision/venv-mlx/
 page-images/
 __pycache__/
+.env
+.DS_Store
+*.log

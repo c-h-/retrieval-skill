@@ -1,17 +1,47 @@
 {
   "name": "retrieval-skill",
   "version": "1.0.0",
-  "description": "Generic retrieval system: incremental indexing + hybrid FTS5/cosine search",
+  "description": "Generic retrieval system: incremental indexing + hybrid FTS5/cosine search with vision embedding support",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/c-h-/retrieval-skill.git"
+  },
+  "homepage": "https://github.com/c-h-/retrieval-skill#readme",
+  "bugs": {
+    "url": "https://github.com/c-h-/retrieval-skill/issues"
+  },
+  "keywords": [
+    "retrieval",
+    "search",
+    "semantic-search",
+    "fts5",
+    "cosine-similarity",
+    "embeddings",
+    "indexing",
+    "sqlite",
+    "hybrid-search",
+    "vision-embeddings",
+    "colbert",
+    "rag"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "bin": {
     "retrieve": "./src/cli.mjs"
   },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.4.0",
     "better-sqlite3": "^11.8.0",
     "commander": "^13.1.0",
     "yaml": "^2.7.0"
