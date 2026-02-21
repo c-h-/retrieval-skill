@@ -3,6 +3,7 @@ import { embedQuery, blobToEmbedding } from './embedder.mjs';
 import { indexDbPath } from './index.mjs';
 import { searchVisionIndex } from './search/maxsim.mjs';
 import { createVisionAdapter } from './adapters/vision-adapter.mjs';
+import { hasAnnIndex, annCandidates } from './ann.mjs';
 import { relative } from 'path';
 
 /**
@@ -132,15 +133,24 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts
     if (score > maxFts) maxFts = score;
   }
 
-  // Step 2: Get all chunks for vector scoring
-  // For small-to-medium indexes (<100K chunks), full scan is fast enough
+  // Step 2: Get chunks for vector scoring — use ANN index if available
+  let annIds = null;
+  if (hasAnnIndex(db)) {
+    const nprobe = opts.nprobe ?? 10;
+    annIds = annCandidates(db, queryEmbedding, nprobe);
+    // Also include FTS candidates so we don't miss keyword matches
+    for (const rowid of ftsScores.keys()) annIds.add(rowid);
+  }
+
   const allChunks = db.prepare(
     'SELECT c.id, c.file_id, c.chunk_index, c.content, c.embedding, c.section_context, c.content_timestamp_ms, f.path, f.metadata FROM chunks c JOIN files f ON c.file_id = f.id'
   ).all();
 
-  // Step 3: Score all chunks
+  // Step 3: Score chunks (filtered by ANN candidates when available)
   const scored = [];
   for (const row of allChunks) {
+    // Skip chunks outside ANN candidate set
+    if (annIds && !annIds.has(row.id)) continue;
     // Apply metadata filters before expensive vector operations
     if (!matchesFilters(row.metadata, filters)) continue;
 
