@@ -192,6 +192,15 @@ export class VisionBridge {
   }
 
   /**
+   * Extract text from each page of a PDF.
+   * Uses PyMuPDF text extraction, with pytesseract OCR fallback for image-only pages.
+   * Returns { pages: Array<{ page_number, text, method }>, has_tesseract: boolean }
+   */
+  async extractText(pdfPath) {
+    return this._call('extract_text', { pdf_path: pdfPath });
+  }
+
+  /**
    * Gracefully shut down the Python server.
    */
   async stop() {

@@ -31,10 +31,12 @@ export function visionIndexDbPath(name) {
  * @param {string} name - Index name
  * @param {Object} opts - Options
  * @param {number} opts.batchSize - Pages to embed per batch (default 2)
- * @returns {Object} Stats: { pages, skipped, errors, totalPages, totalVectors }
+ * @param {boolean} opts.extractText - Also extract text for FTS search (default false)
+ * @returns {Object} Stats: { pages, skipped, errors, totalPages, totalVectors, ocrPages }
  */
 export async function indexPdfVision(pdfPath, name, opts = {}) {
   const batchSize = opts.batchSize || 2;
+  const extractText = opts.extractText || false;
   const adapter = createVisionAdapter();
 
   console.error(`[vision-index] Initializing vision adapter...`);
@@ -159,10 +161,76 @@ export async function indexPdfVision(pdfPath, name, opts = {}) {
   setMeta(db, 'total_pages', String(totalPages));
   setMeta(db, 'total_page_vectors', String(totalVectors));
 
+  // OCR / text extraction step
+  let ocrPages = 0;
+  if (extractText) {
+    console.error(`[vision-index] Extracting text from PDF pages...`);
+    try {
+      const textResult = await adapter.extractText(pdfPath);
+      const pagesWithText = textResult.pages.filter(p => p.text.length > 0);
+      ocrPages = textResult.pages.filter(p => p.method === 'tesseract').length;
+
+      if (pagesWithText.length > 0) {
+        // Store as a synthetic file in the text pipeline for FTS search
+        const syntheticPath = `pdf://${pdfPath}`;
+        const textContent = pagesWithText
+          .map(p => `[Page ${p.page_number + 1}]\n${p.text}`)
+          .join('\n\n');
+        const contentHash = sha256(textContent);
+
+        const existingFile = db.prepare('SELECT id FROM files WHERE path = ?').get(syntheticPath);
+        const now = new Date().toISOString();
+
+        let fileId;
+        if (existingFile) {
+          db.prepare('UPDATE files SET content_hash = ?, mtime_ms = ?, indexed_at = ? WHERE id = ?')
+            .run(contentHash, Date.now(), now, existingFile.id);
+          // Clean old FTS entries
+          const oldChunks = db.prepare('SELECT id, content FROM chunks WHERE file_id = ?').all(existingFile.id);
+          for (const c of oldChunks) {
+            db.prepare("INSERT INTO chunks_fts(chunks_fts, rowid, content, file_path) VALUES('delete', ?, ?, ?)")
+              .run(c.id, c.content, syntheticPath);
+          }
+          db.prepare('DELETE FROM chunks WHERE file_id = ?').run(existingFile.id);
+          fileId = existingFile.id;
+        } else {
+          const result = db.prepare(
+            'INSERT INTO files (path, content_hash, size, mtime_ms, indexed_at) VALUES (?, ?, ?, ?, ?)'
+          ).run(syntheticPath, contentHash, textContent.length, Date.now(), now);
+          fileId = result.lastInsertRowid;
+        }
+
+        // Insert page text as chunks (one chunk per page with text)
+        for (let i = 0; i < pagesWithText.length; i++) {
+          const page = pagesWithText[i];
+          const chunkContent = `[Page ${page.page_number + 1}] ${page.text}`;
+          // Use a zero-filled embedding placeholder — these chunks are FTS-only
+          const emptyBlob = Buffer.alloc(4); // minimal valid BLOB
+          const hash = sha256(chunkContent);
+          const result = db.prepare(
+            'INSERT INTO chunks (file_id, chunk_index, content, embedding, content_hash, section_context) VALUES (?, ?, ?, ?, ?, ?)'
+          ).run(fileId, i, chunkContent, emptyBlob, hash, `Page ${page.page_number + 1}`);
+          db.prepare('INSERT INTO chunks_fts (rowid, content, file_path) VALUES (?, ?, ?)')
+            .run(result.lastInsertRowid, chunkContent, syntheticPath);
+        }
+
+        console.error(`[vision-index] Stored text from ${pagesWithText.length} pages (${ocrPages} via OCR)`);
+        if (!textResult.has_tesseract) {
+          const imageOnlyCount = textResult.pages.filter(p => p.text.length === 0).length;
+          if (imageOnlyCount > 0) {
+            console.error(`[vision-index] ${imageOnlyCount} image-only pages skipped (install pytesseract for OCR)`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[vision-index] Text extraction failed: ${err.message}`);
+    }
+  }
+
   db.close();
   await adapter.dispose();
 
-  const stats = { indexed, skipped, errors, totalPages, totalVectors };
+  const stats = { indexed, skipped, errors, totalPages, totalVectors, ocrPages };
   console.error(`\n[vision-index] Done: ${indexed} pages embedded, ${skipped} cached, ${errors} errors`);
   console.error(`[vision-index] Total: ${totalPages} pages, ${totalVectors} vectors in "${name}"`);
   return stats;

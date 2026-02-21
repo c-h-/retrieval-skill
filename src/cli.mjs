@@ -32,12 +32,14 @@ program
   .description('Index a PDF with vision embeddings (ColQwen2.5)')
   .option('--name <name>', 'Index name (defaults to PDF basename)')
   .option('--batch-size <n>', 'Pages per embedding batch', '2')
+  .option('--extract-text', 'Also extract text for FTS search (OCR fallback for image-only pages)')
   .action(async (pdf, opts) => {
     const pdfPath = resolve(pdf);
     const name = opts.name || pdfPath.split('/').pop().replace(/\.pdf$/i, '');
     const batchSize = parseInt(opts.batchSize, 10);
+    const extractText = !!opts.extractText;
     console.error(`Indexing "${pdfPath}" as "${name}" with vision embeddings...`);
-    const stats = await indexPdfVision(pdfPath, name, { batchSize });
+    const stats = await indexPdfVision(pdfPath, name, { batchSize, extractText });
     console.log(JSON.stringify(stats, null, 2));
   });
 
