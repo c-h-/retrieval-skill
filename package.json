@@ -32,8 +32,10 @@
   "bin": {
     "retrieve": "./src/cli.mjs"
   },
+  "types": "./types/index.d.ts",
   "files": [
     "src/",
+    "types/",
     "README.md",
     "LICENSE"
   ],
