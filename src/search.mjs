@@ -1,10 +1,10 @@
-import { openDb, getMeta } from './schema.mjs';
-import { embedQuery, blobToEmbedding } from './embedder.mjs';
-import { indexDbPath } from './index.mjs';
-import { searchVisionIndex } from './search/maxsim.mjs';
-import { createVisionAdapter } from './adapters/vision-adapter.mjs';
-import { hasAnnIndex, annCandidates } from './ann.mjs';
 import { relative } from 'path';
+import { createVisionAdapter } from './adapters/vision-adapter.mjs';
+import { annCandidates, hasAnnIndex } from './ann.mjs';
+import { blobToEmbedding, embedQuery } from './embedder.mjs';
+import { indexDbPath } from './index.mjs';
+import { getMeta, openDb } from './schema.mjs';
+import { searchVisionIndex } from './search/maxsim.mjs';
 
 /**
  * Compute a recency multiplier for a content timestamp.
@@ -55,8 +55,8 @@ function cosine(a, b) {
 function ftsQuery(query) {
   return query
     .split(/\s+/)
-    .filter(t => t.length > 0)
-    .map(t => `"${t.replace(/"/g, '""')}"`)
+    .filter((t) => t.length > 0)
+    .map((t) => `"${t.replace(/"/g, '""')}"`)
     .join(' OR ');
 }
 
@@ -118,9 +118,9 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts
   const ftsQueryStr = ftsQuery(query);
   let ftsRows = [];
   try {
-    ftsRows = db.prepare(
-      'SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT 200'
-    ).all(ftsQueryStr);
+    ftsRows = db
+      .prepare('SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT 200')
+      .all(ftsQueryStr);
   } catch {
     // FTS query may fail on unusual characters; fall back to pure vector
   }
@@ -142,9 +142,11 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts
     for (const rowid of ftsScores.keys()) annIds.add(rowid);
   }
 
-  const allChunks = db.prepare(
-    'SELECT c.id, c.file_id, c.chunk_index, c.content, c.embedding, c.section_context, c.content_timestamp_ms, f.path, f.metadata FROM chunks c JOIN files f ON c.file_id = f.id'
-  ).all();
+  const allChunks = db
+    .prepare(
+      'SELECT c.id, c.file_id, c.chunk_index, c.content, c.embedding, c.section_context, c.content_timestamp_ms, f.path, f.metadata FROM chunks c JOIN files f ON c.file_id = f.id',
+    )
+    .all();
 
   // Step 3: Score chunks (filtered by ANN candidates when available)
   const scored = [];
@@ -211,7 +213,7 @@ export async function search(query, indexNames, opts = {}) {
   const filters = opts.filters || null;
 
   // --- Text lane ---
-  let textResults = [];
+  const textResults = [];
   if (mode === 'text' || mode === 'hybrid') {
     const queryEmbedding = await embedQuery(query);
 
@@ -226,14 +228,18 @@ export async function search(query, indexNames, opts = {}) {
       }
 
       const sourceDir = getMeta(db, 'source_directory');
-      const results = searchIndex(db, queryEmbedding, query, topK * 2, name, sourceDir, { recencyWeight, halfLifeDays, filters });
+      const results = searchIndex(db, queryEmbedding, query, topK * 2, name, sourceDir, {
+        recencyWeight,
+        halfLifeDays,
+        filters,
+      });
       textResults.push(...results);
       db.close();
     }
   }
 
   // --- Vision lane ---
-  let visionResults = [];
+  const visionResults = [];
   if (mode === 'vision' || mode === 'hybrid') {
     let visionAdapter = null;
     try {
@@ -298,7 +304,7 @@ export async function search(query, indexNames, opts = {}) {
   if (mode === 'vision') {
     // Vision-only: sort by MaxSim score
     visionResults.sort((a, b) => b.score - a.score);
-    return visionResults.slice(0, topK).filter(r => r.score >= threshold);
+    return visionResults.slice(0, topK).filter((r) => r.score >= threshold);
   }
 
   // Hybrid mode: RRF fusion across text vector, text FTS, and vision lanes
@@ -313,7 +319,7 @@ function _mergeTextResults(allResults, topK, threshold) {
   const deduped = [];
   allResults.sort((a, b) => b.score - a.score);
   for (const r of allResults) {
-    const key = r.filePath + ':' + r.chunkIndex;
+    const key = `${r.filePath}:${r.chunkIndex}`;
     if (seen.has(key)) continue;
     seen.add(key);
     if (r.score >= threshold) {
@@ -337,7 +343,7 @@ function _hybridRrfFuse(textResults, visionResults, topK, threshold) {
 
   // Lane 1: Text results sorted by vector score
   const textByVec = [...textResults].sort((a, b) => b.vecScore - a.vecScore);
-  const vecList = textByVec.map((r, i) => {
+  const vecList = textByVec.map((r, _i) => {
     const id = `text:${r.filePath}:${r.chunkIndex}`;
     allItems.set(id, r);
     return { id };
@@ -345,7 +351,7 @@ function _hybridRrfFuse(textResults, visionResults, topK, threshold) {
 
   // Lane 2: Text results sorted by FTS score
   const textByFts = [...textResults].sort((a, b) => b.ftsScore - a.ftsScore);
-  const ftsList = textByFts.map((r, i) => {
+  const ftsList = textByFts.map((r, _i) => {
     const id = `text:${r.filePath}:${r.chunkIndex}`;
     allItems.set(id, r);
     return { id };
@@ -353,7 +359,7 @@ function _hybridRrfFuse(textResults, visionResults, topK, threshold) {
 
   // Lane 3: Vision results sorted by MaxSim score
   const visionSorted = [...visionResults].sort((a, b) => b.score - a.score);
-  const visionList = visionSorted.map((r, i) => {
+  const visionList = visionSorted.map((r, _i) => {
     const id = `vision:${r.indexName}:${r.pageNumber}`;
     allItems.set(id, r);
     return { id };
@@ -375,7 +381,7 @@ function _hybridRrfFuse(textResults, visionResults, topK, threshold) {
   }
 
   fused.sort((a, b) => b.rrfScore - a.rrfScore);
-  return fused.slice(0, topK).filter(r => r.rrfScore >= threshold);
+  return fused.slice(0, topK).filter((r) => r.rrfScore >= threshold);
 }
 
 /**
@@ -406,21 +412,25 @@ export function formatResults(results, query) {
  * Format results as JSON.
  */
 export function formatResultsJson(results) {
-  return JSON.stringify(results.map(r => ({
-    score: r.score,
-    semanticScore: r.semanticScore,
-    rrfScore: r.rrfScore,
-    vecScore: r.vecScore,
-    ftsScore: r.ftsScore,
-    indexName: r.indexName,
-    filePath: r.filePath,
-    relativePath: r.relativePath,
-    sectionContext: r.sectionContext,
-    content: r.content,
-    metadata: r.metadata,
-    contentTimestampMs: r.contentTimestampMs,
-    resultType: r.resultType || 'text',
-    pageNumber: r.pageNumber,
-    sourcePath: r.sourcePath,
-  })), null, 2);
+  return JSON.stringify(
+    results.map((r) => ({
+      score: r.score,
+      semanticScore: r.semanticScore,
+      rrfScore: r.rrfScore,
+      vecScore: r.vecScore,
+      ftsScore: r.ftsScore,
+      indexName: r.indexName,
+      filePath: r.filePath,
+      relativePath: r.relativePath,
+      sectionContext: r.sectionContext,
+      content: r.content,
+      metadata: r.metadata,
+      contentTimestampMs: r.contentTimestampMs,
+      resultType: r.resultType || 'text',
+      pageNumber: r.pageNumber,
+      sourcePath: r.sourcePath,
+    })),
+    null,
+    2,
+  );
 }

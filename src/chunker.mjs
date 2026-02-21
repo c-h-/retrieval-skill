@@ -1,8 +1,8 @@
 import { parse as parseYaml } from 'yaml';
 
 const TARGET_CHUNK_CHARS = 1500; // ~375 tokens at ~4 chars/token, leaves room for context prefix
-const MAX_CHUNK_CHARS = 2000;   // hard max
-const OVERLAP_CHARS = 200;      // overlap for oversized section splits
+const MAX_CHUNK_CHARS = 2000; // hard max
+const OVERLAP_CHARS = 200; // overlap for oversized section splits
 
 /**
  * Parse YAML frontmatter from markdown content.
@@ -77,7 +77,7 @@ export function splitSections(body) {
  * Splits oversized paragraphs at sentence boundaries.
  */
 function splitParagraphs(text) {
-  const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
+  const paragraphs = text.split(/\n\n+/).filter((p) => p.trim());
   const chunks = [];
   let current = '';
 
@@ -126,7 +126,7 @@ function splitParagraphs(text) {
  */
 function splitSentences(text) {
   // Split on sentence-ending punctuation followed by space or end
-  return text.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+  return text.split(/(?<=[.!?])\s+/).filter((s) => s.trim());
 }
 
 /**
@@ -169,8 +169,15 @@ export function chunkDocument(rawContent) {
  * Priority-ordered frontmatter fields for content timestamps.
  */
 const TIMESTAMP_FIELDS = [
-  'last_edited_time', 'updatedAt', 'updated_at', 'last_edited',
-  'createdAt', 'created_at', 'created_time', 'date', 'last-reviewed',
+  'last_edited_time',
+  'updatedAt',
+  'updated_at',
+  'last_edited',
+  'createdAt',
+  'created_at',
+  'created_time',
+  'date',
+  'last-reviewed',
 ];
 
 /**
@@ -204,7 +211,7 @@ function parseTimestamp(val) {
   }
   if (typeof val === 'string') {
     const d = new Date(val);
-    if (!isNaN(d.getTime())) return d.getTime();
+    if (!Number.isNaN(d.getTime())) return d.getTime();
   }
   return null;
 }

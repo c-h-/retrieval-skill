@@ -2,18 +2,15 @@
 
 import { Command } from 'commander';
 import { resolve } from 'path';
-import { indexDirectory, listIndexes, getIndexStatus, deleteIndex, indexDbPath } from './index.mjs';
-import { indexPdfVision } from './vision-index.mjs';
-import { search, formatResults, formatResultsJson } from './search.mjs';
 import { buildAnnIndex } from './ann.mjs';
+import { deleteIndex, getIndexStatus, indexDbPath, indexDirectory, listIndexes } from './index.mjs';
 import { openDb } from './schema.mjs';
+import { formatResults, formatResultsJson, search } from './search.mjs';
+import { indexPdfVision } from './vision-index.mjs';
 
 const program = new Command();
 
-program
-  .name('retrieve')
-  .description('Generic retrieval system: incremental indexing + hybrid search')
-  .version('1.0.0');
+program.name('retrieve').description('Generic retrieval system: incremental indexing + hybrid search').version('1.0.0');
 
 program
   .command('index <directory>')
@@ -35,7 +32,12 @@ program
   .option('--extract-text', 'Also extract text for FTS search (OCR fallback for image-only pages)')
   .action(async (pdf, opts) => {
     const pdfPath = resolve(pdf);
-    const name = opts.name || pdfPath.split('/').pop().replace(/\.pdf$/i, '');
+    const name =
+      opts.name ||
+      pdfPath
+        .split('/')
+        .pop()
+        .replace(/\.pdf$/i, '');
     const batchSize = parseInt(opts.batchSize, 10);
     const extractText = !!opts.extractText;
     console.error(`Indexing "${pdfPath}" as "${name}" with vision embeddings...`);
@@ -52,10 +54,18 @@ program
   .option('--mode <mode>', 'Search mode: text (default), vision, hybrid', 'text')
   .option('--recency-weight <n>', 'Recency weight (0 to disable, default 0.15)', '0.15')
   .option('--half-life <days>', 'Recency half-life in days (default 90)', '90')
-  .option('--filter <key=value>', 'Metadata filter as key=value (repeatable)', (val, acc) => { acc.push(val); return acc; }, [])
+  .option(
+    '--filter <key=value>',
+    'Metadata filter as key=value (repeatable)',
+    (val, acc) => {
+      acc.push(val);
+      return acc;
+    },
+    [],
+  )
   .option('--json', 'Output as JSON')
   .action(async (query, opts) => {
-    const indexNames = opts.index.split(',').map(s => s.trim());
+    const indexNames = opts.index.split(',').map((s) => s.trim());
     const topK = parseInt(opts.topK, 10);
     const threshold = parseFloat(opts.threshold);
     const mode = opts.mode;

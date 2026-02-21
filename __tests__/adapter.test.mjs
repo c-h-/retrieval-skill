@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { validateAdapter, registerAdapter, getAdapter, getAdaptersByType, clearRegistry } from '../src/adapters/adapter.mjs';
+import { describe, expect, it } from 'vitest';
+import {
+  clearRegistry,
+  getAdapter,
+  getAdaptersByType,
+  registerAdapter,
+  validateAdapter,
+} from '../src/adapters/adapter.mjs';
 
 describe('validateAdapter', () => {
   it('validates a complete text adapter', () => {

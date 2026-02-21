@@ -56,11 +56,11 @@ export function getAdapter(name) {
 }
 
 export function getAdaptersByType(type) {
-  return [...registry.values()].filter(a => a.type === type);
+  return [...registry.values()].filter((a) => a.type === type);
 }
 
 export function listAdapters() {
-  return [...registry.values()].map(a => ({ name: a.name, type: a.type, modelId: a.modelId() }));
+  return [...registry.values()].map((a) => ({ name: a.name, type: a.type, modelId: a.modelId() }));
 }
 
 export function clearRegistry() {

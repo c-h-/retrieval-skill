@@ -8,13 +8,12 @@
  * 4. Supports incremental indexing (skip pages by image hash)
  */
 
-import { openDb, setMeta, getMeta } from './schema.mjs';
-import { sha256 } from './utils.mjs';
-import { createVisionAdapter } from './adapters/vision-adapter.mjs';
-import { join } from 'path';
+import { mkdirSync, readFileSync } from 'fs';
 import { homedir } from 'os';
-import { existsSync, mkdirSync, readFileSync } from 'fs';
-import { readdir, unlink } from 'fs/promises';
+import { join } from 'path';
+import { createVisionAdapter } from './adapters/vision-adapter.mjs';
+import { openDb, setMeta } from './schema.mjs';
+import { sha256 } from './utils.mjs';
 
 const DEFAULT_INDEX_DIR = join(homedir(), '.retrieval-skill', 'indexes');
 const PAGE_IMAGES_DIR = join(homedir(), '.retrieval-skill', 'page-images');
@@ -62,15 +61,13 @@ export async function indexPdfVision(pdfPath, name, opts = {}) {
 
   // Prepare statements
   const getPageByDocPage = db.prepare(
-    'SELECT id, image_hash FROM page_images WHERE document_id = ? AND page_number = ?'
+    'SELECT id, image_hash FROM page_images WHERE document_id = ? AND page_number = ?',
   );
   const insertPage = db.prepare(`
     INSERT OR REPLACE INTO page_images (document_id, page_number, image_hash, adapter_name, num_vectors, source_path, indexed_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
-  const deletePageVectors = db.prepare(
-    'DELETE FROM page_vectors WHERE page_image_id = ?'
-  );
+  const deletePageVectors = db.prepare('DELETE FROM page_vectors WHERE page_image_id = ?');
   const insertVector = db.prepare(`
     INSERT INTO page_vectors (page_image_id, vector_index, embedding)
     VALUES (?, ?, ?)
@@ -84,7 +81,7 @@ export async function indexPdfVision(pdfPath, name, opts = {}) {
   for (let batchStart = 0; batchStart < imagePaths.length; batchStart += batchSize) {
     const batchEnd = Math.min(batchStart + batchSize, imagePaths.length);
     const batchPaths = imagePaths.slice(batchStart, batchEnd);
-    const batchPageNums = [];
+    const _batchPageNums = [];
 
     // Check which pages need embedding
     const toEmbed = [];
@@ -132,10 +129,7 @@ export async function indexPdfVision(pdfPath, name, opts = {}) {
           deletePageVectors.run(existing.id);
         }
 
-        const result = insertPage.run(
-          documentId, pageNum, imgHash, adapter.name,
-          numVectors, imgPath, now
-        );
+        const result = insertPage.run(documentId, pageNum, imgHash, adapter.name, numVectors, imgPath, now);
         const pageImageId = result.lastInsertRowid;
 
         // Insert all vectors for this page
@@ -148,14 +142,18 @@ export async function indexPdfVision(pdfPath, name, opts = {}) {
       }
     })();
 
-    console.error(`[vision-index] Progress: ${indexed + skipped}/${pageCount} pages (${indexed} embedded, ${skipped} cached)`);
+    console.error(
+      `[vision-index] Progress: ${indexed + skipped}/${pageCount} pages (${indexed} embedded, ${skipped} cached)`,
+    );
   }
 
   // Store stats
   const totalPages = db.prepare('SELECT COUNT(*) as cnt FROM page_images WHERE document_id = ?').get(documentId).cnt;
-  const totalVectors = db.prepare(
-    'SELECT COUNT(*) as cnt FROM page_vectors pv JOIN page_images pi ON pv.page_image_id = pi.id WHERE pi.document_id = ?'
-  ).get(documentId).cnt;
+  const totalVectors = db
+    .prepare(
+      'SELECT COUNT(*) as cnt FROM page_vectors pv JOIN page_images pi ON pv.page_image_id = pi.id WHERE pi.document_id = ?',
+    )
+    .get(documentId).cnt;
 
   setMeta(db, 'last_vision_indexed_at', new Date().toISOString());
   setMeta(db, 'total_pages', String(totalPages));
@@ -167,15 +165,13 @@ export async function indexPdfVision(pdfPath, name, opts = {}) {
     console.error(`[vision-index] Extracting text from PDF pages...`);
     try {
       const textResult = await adapter.extractText(pdfPath);
-      const pagesWithText = textResult.pages.filter(p => p.text.length > 0);
-      ocrPages = textResult.pages.filter(p => p.method === 'tesseract').length;
+      const pagesWithText = textResult.pages.filter((p) => p.text.length > 0);
+      ocrPages = textResult.pages.filter((p) => p.method === 'tesseract').length;
 
       if (pagesWithText.length > 0) {
         // Store as a synthetic file in the text pipeline for FTS search
         const syntheticPath = `pdf://${pdfPath}`;
-        const textContent = pagesWithText
-          .map(p => `[Page ${p.page_number + 1}]\n${p.text}`)
-          .join('\n\n');
+        const textContent = pagesWithText.map((p) => `[Page ${p.page_number + 1}]\n${p.text}`).join('\n\n');
         const contentHash = sha256(textContent);
 
         const existingFile = db.prepare('SELECT id FROM files WHERE path = ?').get(syntheticPath);
@@ -183,20 +179,27 @@ export async function indexPdfVision(pdfPath, name, opts = {}) {
 
         let fileId;
         if (existingFile) {
-          db.prepare('UPDATE files SET content_hash = ?, mtime_ms = ?, indexed_at = ? WHERE id = ?')
-            .run(contentHash, Date.now(), now, existingFile.id);
+          db.prepare('UPDATE files SET content_hash = ?, mtime_ms = ?, indexed_at = ? WHERE id = ?').run(
+            contentHash,
+            Date.now(),
+            now,
+            existingFile.id,
+          );
           // Clean old FTS entries
           const oldChunks = db.prepare('SELECT id, content FROM chunks WHERE file_id = ?').all(existingFile.id);
           for (const c of oldChunks) {
-            db.prepare("INSERT INTO chunks_fts(chunks_fts, rowid, content, file_path) VALUES('delete', ?, ?, ?)")
-              .run(c.id, c.content, syntheticPath);
+            db.prepare("INSERT INTO chunks_fts(chunks_fts, rowid, content, file_path) VALUES('delete', ?, ?, ?)").run(
+              c.id,
+              c.content,
+              syntheticPath,
+            );
           }
           db.prepare('DELETE FROM chunks WHERE file_id = ?').run(existingFile.id);
           fileId = existingFile.id;
         } else {
-          const result = db.prepare(
-            'INSERT INTO files (path, content_hash, size, mtime_ms, indexed_at) VALUES (?, ?, ?, ?, ?)'
-          ).run(syntheticPath, contentHash, textContent.length, Date.now(), now);
+          const result = db
+            .prepare('INSERT INTO files (path, content_hash, size, mtime_ms, indexed_at) VALUES (?, ?, ?, ?, ?)')
+            .run(syntheticPath, contentHash, textContent.length, Date.now(), now);
           fileId = result.lastInsertRowid;
         }
 
@@ -207,16 +210,21 @@ export async function indexPdfVision(pdfPath, name, opts = {}) {
           // Use a zero-filled embedding placeholder — these chunks are FTS-only
           const emptyBlob = Buffer.alloc(4); // minimal valid BLOB
           const hash = sha256(chunkContent);
-          const result = db.prepare(
-            'INSERT INTO chunks (file_id, chunk_index, content, embedding, content_hash, section_context) VALUES (?, ?, ?, ?, ?, ?)'
-          ).run(fileId, i, chunkContent, emptyBlob, hash, `Page ${page.page_number + 1}`);
-          db.prepare('INSERT INTO chunks_fts (rowid, content, file_path) VALUES (?, ?, ?)')
-            .run(result.lastInsertRowid, chunkContent, syntheticPath);
+          const result = db
+            .prepare(
+              'INSERT INTO chunks (file_id, chunk_index, content, embedding, content_hash, section_context) VALUES (?, ?, ?, ?, ?, ?)',
+            )
+            .run(fileId, i, chunkContent, emptyBlob, hash, `Page ${page.page_number + 1}`);
+          db.prepare('INSERT INTO chunks_fts (rowid, content, file_path) VALUES (?, ?, ?)').run(
+            result.lastInsertRowid,
+            chunkContent,
+            syntheticPath,
+          );
         }
 
         console.error(`[vision-index] Stored text from ${pagesWithText.length} pages (${ocrPages} via OCR)`);
         if (!textResult.has_tesseract) {
-          const imageOnlyCount = textResult.pages.filter(p => p.text.length === 0).length;
+          const imageOnlyCount = textResult.pages.filter((p) => p.text.length === 0).length;
           if (imageOnlyCount > 0) {
             console.error(`[vision-index] ${imageOnlyCount} image-only pages skipped (install pytesseract for OCR)`);
           }

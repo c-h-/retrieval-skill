@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { sha256, chunkHash } from '../src/utils.mjs';
+import { describe, expect, it } from 'vitest';
+import { chunkHash, sha256 } from '../src/utils.mjs';
 
 describe('sha256', () => {
   it('produces consistent hashes', () => {

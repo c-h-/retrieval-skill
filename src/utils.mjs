@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
-import { readdir, stat, readFile } from 'fs/promises';
-import { join, extname } from 'path';
+import { readdir, readFile, stat } from 'fs/promises';
+import { extname, join } from 'path';
 
 const INDEXED_EXTENSIONS = new Set(['.md', '.markdown', '.txt']);
 
@@ -16,7 +16,7 @@ export function sha256(content) {
  * Same content embedded with the same model can reuse the embedding.
  */
 export function chunkHash(content, modelId) {
-  return sha256(content + '\0' + modelId);
+  return sha256(`${content}\0${modelId}`);
 }
 
 /**

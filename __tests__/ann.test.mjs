@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { kmeans, buildAnnIndex, hasAnnIndex, annCandidates } from '../src/ann.mjs';
-import { openDb } from '../src/schema.mjs';
-import { embeddingToBlob } from '../src/embedder.mjs';
-import { existsSync, unlinkSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { existsSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
+import { join } from 'path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { annCandidates, buildAnnIndex, hasAnnIndex, kmeans } from '../src/ann.mjs';
+import { embeddingToBlob } from '../src/embedder.mjs';
+import { openDb } from '../src/schema.mjs';
 
 // Small embedding dimension for tests (real system uses 4096)
 const DIM = 32;
@@ -61,11 +61,14 @@ describe('kmeans', () => {
 
     // Each centroid should be close to one of the true centers
     // (dominant dimension should have the highest value)
-    const dominantDims = centroids.map(c => {
+    const dominantDims = centroids.map((c) => {
       let maxVal = -Infinity;
       let maxIdx = 0;
       for (let i = 0; i < c.length; i++) {
-        if (c[i] > maxVal) { maxVal = c[i]; maxIdx = i; }
+        if (c[i] > maxVal) {
+          maxVal = c[i];
+          maxIdx = i;
+        }
       }
       return maxIdx;
     });
@@ -83,24 +86,38 @@ describe('ANN index (buildAnnIndex / hasAnnIndex / annCandidates)', () => {
     db = openDb(DB_PATH);
 
     // Insert a synthetic file
-    db.prepare(
-      'INSERT INTO files (path, content_hash, size, mtime_ms, indexed_at) VALUES (?, ?, ?, ?, ?)'
-    ).run('/test/file.md', 'abc123', 100, Date.now(), new Date().toISOString());
+    db.prepare('INSERT INTO files (path, content_hash, size, mtime_ms, indexed_at) VALUES (?, ?, ?, ?, ?)').run(
+      '/test/file.md',
+      'abc123',
+      100,
+      Date.now(),
+      new Date().toISOString(),
+    );
     const fileId = 1;
 
     // Create 3 clusters of vectors (50 chunks each = 150 total)
     const centers = [
-      (() => { const v = new Float32Array(DIM).fill(0); v[0] = 1; return v; })(),
-      (() => { const v = new Float32Array(DIM).fill(0); v[1] = 1; return v; })(),
-      (() => { const v = new Float32Array(DIM).fill(0); v[2] = 1; return v; })(),
+      (() => {
+        const v = new Float32Array(DIM).fill(0);
+        v[0] = 1;
+        return v;
+      })(),
+      (() => {
+        const v = new Float32Array(DIM).fill(0);
+        v[1] = 1;
+        return v;
+      })(),
+      (() => {
+        const v = new Float32Array(DIM).fill(0);
+        v[2] = 1;
+        return v;
+      })(),
     ];
 
     const insertChunk = db.prepare(
-      'INSERT INTO chunks (file_id, chunk_index, content, embedding, content_hash) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO chunks (file_id, chunk_index, content, embedding, content_hash) VALUES (?, ?, ?, ?, ?)',
     );
-    const insertFts = db.prepare(
-      'INSERT INTO chunks_fts (rowid, content, file_path) VALUES (?, ?, ?)'
-    );
+    const insertFts = db.prepare('INSERT INTO chunks_fts (rowid, content, file_path) VALUES (?, ?, ?)');
 
     let chunkIdx = 0;
     for (let c = 0; c < 3; c++) {

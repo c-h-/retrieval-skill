@@ -92,7 +92,10 @@ function kmeansInit(vectors, k) {
     let chosen = 0;
     for (let i = 0; i < n; i++) {
       target -= dists[i];
-      if (target <= 0) { chosen = i; break; }
+      if (target <= 0) {
+        chosen = i;
+        break;
+      }
     }
     centroids.push(vectors[chosen]);
   }
@@ -148,8 +151,8 @@ export function buildAnnIndex(db, opts = {}) {
     return { built: false, reason: `Only ${rows.length} chunks (need ${minChunks})`, numClusters: 0 };
   }
 
-  const vectors = rows.map(r => blobToEmbedding(r.embedding));
-  const ids = rows.map(r => r.id);
+  const vectors = rows.map((r) => blobToEmbedding(r.embedding));
+  const ids = rows.map((r) => r.id);
 
   // Number of clusters: sqrt(N), clamped to [8, 4096]
   const k = Math.max(8, Math.min(4096, Math.round(Math.sqrt(rows.length))));
@@ -166,7 +169,7 @@ export function buildAnnIndex(db, opts = {}) {
   `);
 
   // Ensure cluster_id column exists on chunks
-  const cols = db.pragma('table_info(chunks)').map(c => c.name);
+  const cols = db.pragma('table_info(chunks)').map((c) => c.name);
   if (!cols.includes('cluster_id')) {
     db.exec('ALTER TABLE chunks ADD COLUMN cluster_id INTEGER');
   }
@@ -220,24 +223,22 @@ export function hasAnnIndex(db) {
 export function annCandidates(db, queryEmbedding, nprobe = 10) {
   // Load centroids
   const centroidRows = db.prepare('SELECT id, centroid FROM ann_centroids ORDER BY id').all();
-  const centroids = centroidRows.map(r => ({
+  const centroids = centroidRows.map((r) => ({
     id: r.id,
     vec: blobToEmbedding(r.centroid),
   }));
 
   // Find top nprobe nearest centroids using dot product (cosine for normalized vecs)
-  const scored = centroids.map(c => ({
+  const scored = centroids.map((c) => ({
     id: c.id,
     score: dot(queryEmbedding, c.vec),
   }));
   scored.sort((a, b) => b.score - a.score);
-  const probeIds = scored.slice(0, nprobe).map(s => s.id);
+  const probeIds = scored.slice(0, nprobe).map((s) => s.id);
 
   // Get all chunk IDs in these clusters
   const placeholders = probeIds.map(() => '?').join(',');
-  const chunkRows = db.prepare(
-    `SELECT id FROM chunks WHERE cluster_id IN (${placeholders})`
-  ).all(...probeIds);
+  const chunkRows = db.prepare(`SELECT id FROM chunks WHERE cluster_id IN (${placeholders})`).all(...probeIds);
 
-  return new Set(chunkRows.map(r => r.id));
+  return new Set(chunkRows.map((r) => r.id));
 }

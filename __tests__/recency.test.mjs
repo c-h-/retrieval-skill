@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { extractContentTimestamp } from '../src/chunker.mjs';
 import { recencyBoost, relativeAge } from '../src/search.mjs';
 
@@ -118,8 +118,8 @@ describe('recencyBoost', () => {
   it('returns higher value for newer content', () => {
     const now = Date.now();
     vi.spyOn(Date, 'now').mockReturnValue(now);
-    const recent = now - 7 * 86_400_000;  // 7 days
-    const old = now - 365 * 86_400_000;   // 1 year
+    const recent = now - 7 * 86_400_000; // 7 days
+    const old = now - 365 * 86_400_000; // 1 year
     expect(recencyBoost(recent, 90)).toBeGreaterThan(recencyBoost(old, 90));
   });
 

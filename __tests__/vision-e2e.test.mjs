@@ -11,15 +11,15 @@
  * Run with: npx vitest run __tests__/vision-e2e.test.mjs
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { openDb, getMeta } from '../src/schema.mjs';
-import { indexPdfVision } from '../src/vision-index.mjs';
-import { searchVisionIndex } from '../src/search/maxsim.mjs';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createVisionAdapter } from '../src/adapters/vision-adapter.mjs';
+import { getMeta, openDb } from '../src/schema.mjs';
+import { searchVisionIndex } from '../src/search/maxsim.mjs';
+import { indexPdfVision } from '../src/vision-index.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -94,11 +94,7 @@ describe.skipIf(!canRun)('Vision E2E: Skinnytaste PDF', () => {
     }
 
     try {
-      const queries = [
-        'vegetarian pasta under 30 minutes',
-        'high protein meal prep',
-        'quick breakfast ideas',
-      ];
+      const queries = ['vegetarian pasta under 30 minutes', 'high protein meal prep', 'quick breakfast ideas'];
 
       for (const query of queries) {
         const queryVectors = await adapter.embedQuery(query);
