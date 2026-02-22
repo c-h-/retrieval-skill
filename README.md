@@ -39,8 +39,13 @@ Each index is a self-contained SQLite database stored in `~/.retrieval-skill/ind
 
 ## Installation
 
+This package is not published to npm. Install from source:
+
 ```bash
-npm install -g retrieval-skill
+git clone https://github.com/c-h-/retrieval-skill.git
+cd retrieval-skill
+npm install
+npm link   # makes the `retrieve` command available globally
 ```
 
 **Requirements:**
