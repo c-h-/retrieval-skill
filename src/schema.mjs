@@ -1,8 +1,9 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'fs';
 import { dirname } from 'path';
+import * as sqliteVec from 'sqlite-vec';
 
-const SCHEMA_VERSION = 4; // v4: added content_timestamp_ms to chunks
+const SCHEMA_VERSION = 5; // v5: sqlite-vec replaces JS ANN
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -71,12 +72,19 @@ CREATE INDEX IF NOT EXISTS idx_page_vectors_page ON page_vectors(page_image_id);
  * Open or create an index database at the given path.
  * Returns a better-sqlite3 Database instance with schema initialized.
  */
-export function openDb(dbPath, { vision = false } = {}) {
+export function openDb(dbPath, { vision = false, embeddingDim = 4096 } = {}) {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+
+  // Load sqlite-vec extension
+  sqliteVec.load(db);
+
   db.exec(SCHEMA_SQL);
+
+  // Create vec0 virtual table for vector search (dimension must be known)
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding float[${embeddingDim}])`);
 
   // Run vision schema migration (additive, safe to run on any DB)
   if (vision) {
@@ -98,6 +106,11 @@ export function openDb(dbPath, { vision = false } = {}) {
       if (!cols.includes('content_timestamp_ms')) {
         db.exec('ALTER TABLE chunks ADD COLUMN content_timestamp_ms INTEGER');
       }
+    }
+    if (ver < 5) {
+      // v5 migration: drop old ANN tables if they exist
+      db.exec('DROP TABLE IF EXISTS ann_centroids');
+      // Remove cluster_id column is not possible in SQLite, but it's harmless to leave
     }
     if (ver < SCHEMA_VERSION) {
       db.prepare('UPDATE meta SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION), 'schema_version');

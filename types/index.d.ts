@@ -6,7 +6,7 @@ import type Database from "better-sqlite3";
 
 export function openDb(
   dbPath: string,
-  opts?: { vision?: boolean }
+  opts?: { vision?: boolean; embeddingDim?: number }
 ): Database.Database;
 export function getMeta(db: Database.Database, key: string): string | null;
 export function setMeta(db: Database.Database, key: string, value: string): void;
@@ -172,32 +172,22 @@ export function search(
 export function formatResults(results: SearchResult[], query: string): string;
 export function formatResultsJson(results: SearchResult[]): string;
 
-// --- ann.mjs ---
-export function kmeans(
-  vectors: Float32Array[],
-  k: number,
-  maxIter?: number
-): Float32Array[];
-
-export interface AnnBuildResult {
-  built: boolean;
-  reason?: string;
-  numClusters: number;
-  numChunks?: number;
-}
-
-export function buildAnnIndex(
+// --- ann.mjs (sqlite-vec) ---
+export function insertVec(
   db: Database.Database,
-  opts?: { minChunks?: number }
-): AnnBuildResult;
+  rowid: number,
+  embedding: Float32Array | Buffer
+): void;
 
-export function hasAnnIndex(db: Database.Database): boolean;
+export function deleteVec(db: Database.Database, rowid: number): void;
 
-export function annCandidates(
+export function deleteVecForFile(db: Database.Database, fileId: number): void;
+
+export function vecSearch(
   db: Database.Database,
   queryEmbedding: Float32Array,
-  nprobe?: number
-): Set<number>;
+  k?: number
+): Array<{ rowid: number; distance: number }>;
 
 // --- search/maxsim.mjs ---
 export function maxSimScore(

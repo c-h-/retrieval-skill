@@ -6,7 +6,7 @@ Generic retrieval system: incremental indexing + hybrid FTS5/cosine search. Powe
 
 retrieval-skill indexes directories of markdown files (and PDFs) into SQLite databases, then provides hybrid search combining:
 
-- **Vector similarity** (60%) — cosine similarity via [Octen-Embedding-8B](https://huggingface.co/Octen/Octen-Embedding-8B) (4096-dim)
+- **Vector similarity** (60%) — SIMD-accelerated nearest-neighbor search via [sqlite-vec](https://github.com/asg017/sqlite-vec) + [Octen-Embedding-8B](https://huggingface.co/Octen/Octen-Embedding-8B) (4096-dim)
 - **FTS5 keyword matching** (40%) — SQLite full-text search with BM25 ranking
 - **Vision embeddings** — [ColQwen2.5](https://huggingface.co/tsystems/colqwen2.5-3b-multilingual-v1.0-merged) multi-vector page embeddings for PDF retrieval
 - **Recency boost** — time-aware scoring with configurable half-life decay
@@ -23,6 +23,7 @@ Markdown/PDF Files
         │    walkFiles() → chunkDocument()                │
         │    → Octen-8B embeddings (4096-dim)             │
         │    → SQLite: files, chunks, chunks_fts          │
+        │    → sqlite-vec: chunks_vec (SIMD KNN)          │
         │                                                 │
         ├─── Vision Pipeline ────────────────────────────┐│
         │    extractPages() (PDF → PNG)                  ││
@@ -30,7 +31,7 @@ Markdown/PDF Files
         │    → SQLite: page_images, page_vectors         ││
         │                                                ││
         └─── Hybrid Search ──────────────────────────────┘│
-             FTS5 candidates → vector scoring             │
+             sqlite-vec KNN + FTS5 keyword matching       │
              + MaxSim vision scoring                      │
              → RRF fusion → recency boost → top-K         │
 ```
