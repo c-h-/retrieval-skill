@@ -1,5 +1,6 @@
 import { parse as parseYaml } from 'yaml';
 
+const MIN_CHUNK_CHARS = 80; // skip chunks shorter than this after trimming
 const TARGET_CHUNK_CHARS = 1500; // ~375 tokens at ~4 chars/token, leaves room for context prefix
 const MAX_CHUNK_CHARS = 2000; // hard max
 const OVERLAP_CHARS = 200; // overlap for oversized section splits
@@ -153,6 +154,8 @@ export function chunkDocument(rawContent) {
     const paragraphChunks = splitParagraphs(section.content);
 
     for (const chunkText of paragraphChunks) {
+      if (chunkText.trim().length < MIN_CHUNK_CHARS) continue;
+
       // Prepend context prefix to chunk content for better retrieval
       const prefix = sectionContext ? `[${sectionContext}] ` : '';
       chunks.push({
