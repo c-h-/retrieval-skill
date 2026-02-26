@@ -4,6 +4,7 @@ import { join } from 'path';
 import { deleteVecForFile, insertVec } from './ann.mjs';
 import { chunkDocument, extractContentTimestamp, extractMetadata, parseFrontmatter } from './chunker.mjs';
 import { embedDocuments, embeddingToBlob, getModelId } from './embedder.mjs';
+import { chunkGogMessage, chunkGogThread, detectGogFormat } from './gog-chunker.mjs';
 import { getMeta, openDb, setMeta } from './schema.mjs';
 import { chunkHash, readFileContent, sha256, walkFiles } from './utils.mjs';
 
@@ -123,7 +124,13 @@ export async function indexDirectory(directory, name, _opts = {}) {
     const { frontmatter } = parseFrontmatter(content);
     const metadata = extractMetadata(frontmatter);
     const contentTimestampMs = extractContentTimestamp(frontmatter, file.mtimeMs);
-    const chunks = chunkDocument(content);
+    const gogFormat = detectGogFormat(frontmatter);
+    const chunks =
+      gogFormat === 'thread'
+        ? chunkGogThread(content)
+        : gogFormat === 'message'
+          ? chunkGogMessage(content)
+          : chunkDocument(content);
 
     if (chunks.length === 0) {
       skipped++;

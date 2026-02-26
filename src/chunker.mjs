@@ -1,8 +1,8 @@
 import { parse as parseYaml } from 'yaml';
 
-const MIN_CHUNK_CHARS = 80; // skip chunks shorter than this after trimming
-const TARGET_CHUNK_CHARS = 1500; // ~375 tokens at ~4 chars/token, leaves room for context prefix
-const MAX_CHUNK_CHARS = 2000; // hard max
+export const MIN_CHUNK_CHARS = 80; // skip chunks shorter than this after trimming
+export const TARGET_CHUNK_CHARS = 1500; // ~375 tokens at ~4 chars/token, leaves room for context prefix
+export const MAX_CHUNK_CHARS = 2000; // hard max
 const OVERLAP_CHARS = 200; // overlap for oversized section splits
 
 /**
@@ -77,7 +77,7 @@ export function splitSections(body) {
  * Merges small paragraphs up to TARGET_CHUNK_CHARS.
  * Splits oversized paragraphs at sentence boundaries.
  */
-function splitParagraphs(text) {
+export function splitParagraphs(text) {
   const paragraphs = text.split(/\n\n+/).filter((p) => p.trim());
   const chunks = [];
   let current = '';
