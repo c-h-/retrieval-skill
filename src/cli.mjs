@@ -2,9 +2,7 @@
 
 import { Command } from 'commander';
 import { resolve } from 'path';
-import { buildAnnIndex } from './ann.mjs';
-import { deleteIndex, getIndexStatus, indexDbPath, indexDirectory, listIndexes } from './index.mjs';
-import { openDb } from './schema.mjs';
+import { deleteIndex, getIndexStatus, indexDirectory, listIndexes } from './index.mjs';
 import { formatResults, formatResultsJson, search } from './search.mjs';
 import { indexPdfVision } from './vision-index.mjs';
 
@@ -128,18 +126,6 @@ program
       console.error(`Error: ${err.message}`);
       process.exit(1);
     }
-  });
-
-program
-  .command('build-ann <name>')
-  .description('Build approximate nearest neighbor index for faster vector search')
-  .option('--min-chunks <n>', 'Minimum chunks required to build (default 1000)', '1000')
-  .action((name, opts) => {
-    const dbPath = indexDbPath(name);
-    const db = openDb(dbPath);
-    const result = buildAnnIndex(db, { minChunks: parseInt(opts.minChunks, 10) });
-    db.close();
-    console.log(JSON.stringify(result, null, 2));
   });
 
 program

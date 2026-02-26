@@ -1,7 +1,7 @@
 import { relative } from 'path';
 import { createVisionAdapter } from './adapters/vision-adapter.mjs';
-import { annCandidates, hasAnnIndex } from './ann.mjs';
-import { blobToEmbedding, embedQuery } from './embedder.mjs';
+import { vecSearch } from './ann.mjs';
+import { embedQuery } from './embedder.mjs';
 import { indexDbPath } from './index.mjs';
 import { getMeta, openDb } from './schema.mjs';
 import { searchVisionIndex } from './search/maxsim.mjs';
@@ -41,12 +41,11 @@ export function relativeAge(timestampMs) {
 }
 
 /**
- * Cosine similarity between two normalized Float32Arrays (= dot product).
+ * Convert sqlite-vec L2 distance to a cosine-like score in [0, 1].
+ * For normalized vectors, L2² = 2(1 - cos). So cos = 1 - dist²/2.
  */
-function cosine(a, b) {
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-  return dot;
+function distanceToScore(distance) {
+  return Math.max(0, 1 - (distance * distance) / 2);
 }
 
 /**
@@ -108,8 +107,7 @@ export function matchesFilters(metadataJson, filters) {
 
 /**
  * Search a single index database (text pipeline only).
- * Returns array of results sorted by hybrid score.
- * This is the ORIGINAL text search — unchanged behavior when mode='text'.
+ * Uses sqlite-vec for vector search, FTS5 for keyword search, then fuses.
  */
 function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts = {}) {
   const filters = opts.filters || null;
@@ -133,38 +131,44 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts
     if (score > maxFts) maxFts = score;
   }
 
-  // Step 2: Get chunks for vector scoring — use ANN index if available
-  let annIds = null;
-  if (hasAnnIndex(db)) {
-    const nprobe = opts.nprobe ?? 10;
-    annIds = annCandidates(db, queryEmbedding, nprobe);
-    // Also include FTS candidates so we don't miss keyword matches
-    for (const rowid of ftsScores.keys()) annIds.add(rowid);
+  // Step 2: sqlite-vec KNN search — returns top candidates by L2 distance
+  const vecResults = vecSearch(db, queryEmbedding, topK * 10);
+  const vecScoreMap = new Map();
+  for (const vr of vecResults) {
+    vecScoreMap.set(vr.rowid, distanceToScore(vr.distance));
   }
 
-  const allChunks = db
-    .prepare(
-      'SELECT c.id, c.file_id, c.chunk_index, c.content, c.embedding, c.section_context, c.content_timestamp_ms, f.path, f.metadata FROM chunks c JOIN files f ON c.file_id = f.id',
-    )
-    .all();
+  // Also include FTS-only candidates in the scoring set
+  for (const rowid of ftsScores.keys()) {
+    if (!vecScoreMap.has(rowid)) vecScoreMap.set(rowid, 0);
+  }
 
-  // Step 3: Score chunks (filtered by ANN candidates when available)
+  // Step 3: Fetch chunk details for all candidates
+  const candidateIds = [...vecScoreMap.keys()];
+  if (candidateIds.length === 0) return [];
+
+  const placeholders = candidateIds.map(() => '?').join(',');
+  const chunkRows = db
+    .prepare(
+      `SELECT c.id, c.file_id, c.chunk_index, c.content, c.section_context, c.content_timestamp_ms, f.path, f.metadata
+       FROM chunks c JOIN files f ON c.file_id = f.id
+       WHERE c.id IN (${placeholders})`,
+    )
+    .all(...candidateIds);
+
+  // Step 4: Score and rank
   const scored = [];
-  for (const row of allChunks) {
-    // Skip chunks outside ANN candidate set
-    if (annIds && !annIds.has(row.id)) continue;
-    // Apply metadata filters before expensive vector operations
+  for (const row of chunkRows) {
     if (!matchesFilters(row.metadata, filters)) continue;
 
-    const vec = blobToEmbedding(row.embedding);
-    const vecScore = cosine(queryEmbedding, vec);
+    const vecScore = vecScoreMap.get(row.id) || 0;
     const ftsScore = ftsScores.get(row.id) || 0;
     const normalizedFts = maxFts > 0 ? ftsScore / maxFts : 0;
 
     // Hybrid: 60% vector + 40% FTS
     const hybrid = vecScore * 0.6 + normalizedFts * 0.4;
 
-    // Apply recency boost: finalScore = semantic * (1 - w + w * boost)
+    // Apply recency boost
     const recencyWeight = opts.recencyWeight ?? 0;
     const halfLifeDays = opts.halfLifeDays ?? 90;
     const boost = recencyBoost(row.content_timestamp_ms, halfLifeDays);
@@ -187,7 +191,6 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts
     });
   }
 
-  // Sort by hybrid score descending
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, topK);
 }

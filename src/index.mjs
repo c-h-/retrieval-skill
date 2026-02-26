@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { deleteVecForFile, insertVec } from './ann.mjs';
 import { chunkDocument, extractContentTimestamp, extractMetadata, parseFrontmatter } from './chunker.mjs';
 import { embedDocuments, embeddingToBlob, getModelId } from './embedder.mjs';
 import { getMeta, openDb, setMeta } from './schema.mjs';
@@ -76,6 +77,7 @@ export async function indexDirectory(directory, name, _opts = {}) {
   for (const dbFile of allDbPaths) {
     if (!filePathSet.has(dbFile.path)) {
       deleteFtsForFile(dbFile.id);
+      deleteVecForFile(db, dbFile.id);
       deleteFileChunks.run(dbFile.id);
       db.prepare('DELETE FROM files WHERE id = ?').run(dbFile.id);
       pruned++;
@@ -157,8 +159,9 @@ export async function indexDirectory(directory, name, _opts = {}) {
     db.transaction(() => {
       let fileId;
       if (existing) {
-        // Delete old chunks + FTS entries
+        // Delete old chunks + FTS + vec entries
         deleteFtsForFile(existing.id);
+        deleteVecForFile(db, existing.id);
         deleteFileChunks.run(existing.id);
         updateFile.run(contentHash, file.size, file.mtimeMs, now, metadata, existing.id);
         fileId = existing.id;
@@ -180,6 +183,7 @@ export async function indexDirectory(directory, name, _opts = {}) {
           contentTimestampMs,
         );
         insertFts.run(result.lastInsertRowid, chunks[ci].content, file.path);
+        insertVec(db, result.lastInsertRowid, embBlob);
       }
     })();
 
