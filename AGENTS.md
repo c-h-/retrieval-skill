@@ -16,6 +16,7 @@ src/
 ├── search.mjs               # Hybrid search: vector + FTS5 + vision + RRF fusion
 ├── schema.mjs               # SQLite schema, migrations (v1→v4), openDb()
 ├── chunker.mjs              # Markdown parsing: frontmatter, sections, chunks
+├── gog-chunker.mjs          # Email (gog) chunking: thread splitting, HTML strip, dedup
 ├── embedder.mjs             # Octen embedding server client (HTTP)
 ├── utils.mjs                # sha256, chunkHash, walkFiles, readFileContent
 ├── adapters/
@@ -37,7 +38,7 @@ src/
 
 ### Data flow
 
-**Text indexing:** `cli.mjs` → `index.mjs` → `chunker.mjs` + `embedder.mjs` → `schema.mjs` (SQLite)
+**Text indexing:** `cli.mjs` → `index.mjs` → `chunker.mjs` (or `gog-chunker.mjs` for email) + `embedder.mjs` → `schema.mjs` (SQLite)
 
 **Vision indexing:** `cli.mjs` → `vision-index.mjs` → `vision-adapter.mjs` → `bridge.mjs` → `server.py`/`server_mlx.py`
 
@@ -90,6 +91,7 @@ No build step required — the project uses pure ES modules (.mjs).
 __tests__/
 ├── adapter.test.mjs       # Adapter interface validation, registry operations
 ├── chunker.test.mjs       # Markdown parsing, frontmatter, section splitting
+├── gog-chunker.test.mjs   # Email chunking: thread split, HTML strip, dedup, integration
 ├── maxsim.test.mjs        # MaxSim scoring math (cosine, identity, scaling)
 ├── recency.test.mjs       # Timestamp extraction, recency boost, relative age
 ├── schema-vision.test.mjs # Vision schema tables, cascade delete, migrations
