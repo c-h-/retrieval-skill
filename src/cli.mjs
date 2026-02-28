@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
+import 'dotenv/config';
+
 import { execFileSync } from 'child_process';
 import { Command } from 'commander';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { runDoctor } from './doctor.mjs';
 import { deleteIndex, getIndexStatus, indexDirectory, listIndexes } from './index.mjs';
 import { formatResults, formatResultsJson, search } from './search.mjs';
 import { indexPdfVision } from './vision-index.mjs';
@@ -138,6 +141,16 @@ program
   .action((name) => {
     deleteIndex(name);
     console.log(`Index "${name}" deleted.`);
+  });
+
+// ─── Stack health ───
+
+program
+  .command('doctor')
+  .description('Check the full retrieval stack health')
+  .action(async () => {
+    const ok = await runDoctor();
+    process.exit(ok ? 0 : 1);
   });
 
 // ─── Mirror commands (SaaS data connectors) ───
