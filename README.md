@@ -28,6 +28,68 @@ retrieval-skill is the complete retrieval stack:
 
 All connectors support incremental sync, crash-resumable state, per-entity error isolation, and automatic rate limiting.
 
+## Getting Started from Zero
+
+End-to-end setup: embedding server, retrieval stack, connectors, first search.
+
+### 1. Set up the embedding server
+
+```bash
+git clone https://github.com/c-h-/octen-embeddings-server.git
+cd octen-embeddings-server
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Download pre-converted MLX weights (~16 GB)
+huggingface-cli download chulcher/Octen-Embedding-8B-mlx --local-dir models/Octen-Embedding-8B-mlx
+```
+
+### 2. Set up retrieval-skill
+
+```bash
+git clone https://github.com/c-h-/retrieval-skill.git
+cd retrieval-skill
+npm install
+npm link   # makes `retrieve` available globally
+```
+
+### 3. Configure connectors
+
+```bash
+cp .env.example .env
+# Edit .env — add credentials for the connectors you want (Slack, Notion, Linear, Gmail)
+# Only connectors with valid credentials will activate
+```
+
+### 4. Start the stack
+
+```bash
+retrieve up
+# Starts the embedding server, waits for it to be healthy,
+# loads the sync scheduler, then runs `retrieve doctor` to verify.
+```
+
+### 5. First sync and index
+
+```bash
+retrieve mirror sync           # Pull data from configured connectors
+retrieve index ./data/slack --name slack
+retrieve index ./data/notion --name notion
+```
+
+### 6. Search
+
+```bash
+retrieve search "authentication flow" --index slack,notion --json
+```
+
+### 7. Verify health
+
+```bash
+retrieve doctor
+# Shows pass/fail for: embedding server, connectors, indexes, disk, scheduler
+```
+
 ## Architecture
 
 ```
@@ -200,6 +262,20 @@ Run as a long-lived daemon with periodic sync.
 | `--interval <minutes>` | Minutes between sync cycles | `15` |
 | `--output <dir>` | Output directory | `./data` |
 
+### Stack management
+
+#### `retrieve doctor`
+
+Check the full retrieval stack health (embedding server, connectors, indexes, disk, scheduler).
+
+#### `retrieve up`
+
+Start the embedding server and sync scheduler, then verify with `retrieve doctor`.
+
+#### `retrieve down`
+
+Stop the sync scheduler and embedding server.
+
 ## Connector setup
 
 Each connector activates automatically when its required environment variables are set. Only configure the connectors you need.
@@ -233,6 +309,67 @@ retrieval-skill is source-agnostic — it indexes any directory of markdown file
 | `VISION_BACKEND` | Vision backend: `torch` or `mlx` | `torch` |
 
 Index storage: `~/.retrieval-skill/indexes/` (one `.db` file per index).
+
+## Stack management
+
+#### `retrieve up`
+
+Start the embedding server and sync scheduler. Waits up to 30s for the embedding server to become healthy, then runs `retrieve doctor` to verify the full stack.
+
+#### `retrieve down`
+
+Stop the sync scheduler and embedding server. Kills by launchd label or by port.
+
+#### `retrieve doctor`
+
+Check the full stack health: embedding server, connector credentials, index freshness, disk space, and scheduler status. Exit code 0 if all critical checks pass.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OCTEN_SERVER_DIR` | Path to octen-embeddings-server checkout | `~/personal/octen-embeddings-server` |
+| `OCTEN_PLIST_LABEL` | Launchd label for the embedding server | `com.openclaw.octen-embeddings` |
+| `RETRIEVAL_PLIST_LABEL` | Launchd label for the sync scheduler | `com.retrieval-skill.sync` |
+
+## Scheduling
+
+A launchd-based scheduler runs mirror sync + indexing every 30 minutes.
+
+### What it does
+
+Every 30 minutes, the scheduler:
+1. Runs `retrieve mirror sync` to pull latest data from configured connectors
+2. Checks if the embedding server is running on `:8100`
+3. If available, re-indexes each adapter directory (`slack`, `notion`, `linear`, `gog`)
+
+### Install
+
+```bash
+bash scheduling/setup.sh install
+```
+
+This creates a launchd plist at `~/Library/LaunchAgents/com.retrieval-skill.sync.plist` and loads it immediately. The job also runs at load time.
+
+### Uninstall
+
+```bash
+bash scheduling/setup.sh uninstall
+```
+
+### Check status
+
+```bash
+launchctl list | grep retrieval-skill
+# or
+retrieve doctor   # shows scheduler status alongside other checks
+```
+
+### Logs
+
+Scheduler output goes to `/tmp/retrieval-skill-sync.log`:
+
+```bash
+tail -f /tmp/retrieval-skill-sync.log
+```
 
 ## Search scoring
 
