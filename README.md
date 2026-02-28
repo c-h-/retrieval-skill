@@ -1,10 +1,17 @@
 # retrieval-skill
 
-Generic retrieval system: incremental indexing + hybrid FTS5/cosine search. Powers semantic search across Slack, Notion, Linear, Gmail, and code repos for [OpenClaw](https://github.com/orgloop) agents.
+Organizational knowledge system: mirror SaaS data, index it, search it, deep research it. Powers semantic search across Slack, Notion, Linear, Gmail, and local documents for [OpenClaw](https://github.com/orgloop) agents.
 
 ## What it does
 
-retrieval-skill indexes directories of markdown files (and PDFs) into SQLite databases, then provides hybrid search combining:
+retrieval-skill is the complete retrieval stack:
+
+1. **Mirror** — replicate SaaS data (Slack, Notion, Linear, Gmail) into local Markdown
+2. **Index** — incremental indexing of Markdown files and PDFs into SQLite databases
+3. **Search** — hybrid search combining vector similarity, keyword matching, and recency
+4. **Deep research** — exhaustive cross-source investigation with provenance
+
+### Search capabilities
 
 - **Vector similarity** (60%) — SIMD-accelerated nearest-neighbor search via [sqlite-vec](https://github.com/asg017/sqlite-vec) + [Octen-Embedding-8B](https://huggingface.co/Octen/Octen-Embedding-8B) (4096-dim)
 - **FTS5 keyword matching** (40%) — SQLite full-text search with BM25 ranking
@@ -12,12 +19,25 @@ retrieval-skill indexes directories of markdown files (and PDFs) into SQLite dat
 - **Recency boost** — time-aware scoring with configurable half-life decay
 - **RRF fusion** — Reciprocal Rank Fusion across text, keyword, and vision search lanes
 
-Indexing is incremental: content-addressed deduplication, mtime checking, and chunk-level caching ensure fast re-indexing.
+### Connector capabilities
+
+- **Slack** — channels, threads, files, with per-channel incremental sync
+- **Notion** — pages, databases, with recursive block tree rendering
+- **Linear** — issues, comments, attachments, with per-team sync
+- **Gmail** — messages, threads, labels, with history-based incremental sync
+
+All connectors support incremental sync, crash-resumable state, per-entity error isolation, and automatic rate limiting.
 
 ## Architecture
 
 ```
-Markdown/PDF Files
+SaaS APIs (Slack, Notion, Linear, Gmail)
+        │
+        └─── Mirror Pipeline ─────────────────────────────┐
+             API fetch → rate limiting → Markdown + YAML   │
+             → local filesystem (data/{source}/)           │
+                                                           │
+Markdown/PDF Files ────────────────────────────────────────┘
         │
         ├─── Text Pipeline ──────────────────────────────┐
         │    walkFiles() → chunkDocument()                │
@@ -40,8 +60,6 @@ Each index is a self-contained SQLite database stored in `~/.retrieval-skill/ind
 
 ## Installation
 
-This package is not published to npm. Install from source:
-
 ```bash
 git clone https://github.com/c-h-/retrieval-skill.git
 cd retrieval-skill
@@ -57,8 +75,6 @@ npm link   # makes the `retrieve` command available globally
 - Python >= 3.10
 - PyTorch + MPS backend, or Apple MLX
 
-Set up the vision backend:
-
 ```bash
 # PyTorch (default)
 cd src/vision && bash setup.sh
@@ -67,64 +83,68 @@ cd src/vision && bash setup.sh
 cd src/vision && bash setup-mlx.sh
 ```
 
+**For SaaS connectors (optional):**
+```bash
+cp .env.example .env
+# Edit .env with your API credentials
+```
+
 ## Quick start
+
+### Mirror + Index + Search
+
+```bash
+# 1. Sync data from configured SaaS connectors
+retrieve mirror sync
+
+# 2. Index the mirrored data
+retrieve index ./data/slack --name slack
+retrieve index ./data/notion --name notion
+
+# 3. Search across everything
+retrieve search "authentication flow" --index slack,notion --json
+```
+
+### Index local files directly
 
 ```bash
 # Index a directory of markdown files
-retrieve index ./slack-export --name slack
-
-# Search across indexes
-retrieve search "authentication flow" --index slack
-
-# Search multiple indexes
-retrieve search "onboarding checklist" --index slack,notion,linear
+retrieve index ./my-docs --name docs
 
 # Index a PDF with vision embeddings
-retrieve index-vision ./cookbook.pdf --name cookbook
+retrieve index-vision ./handbook.pdf --name handbook
 
 # Hybrid search (text + vision)
-retrieve search "chocolate cake recipe" --index cookbook --mode hybrid
-
-# Output as JSON for programmatic use
-retrieve search "API design" --index linear --json
+retrieve search "onboarding process" --index docs,handbook --mode hybrid --json
 ```
 
 ## CLI reference
 
-### `retrieve index <directory>`
+### Indexing
+
+#### `retrieve index <directory>`
 
 Index a directory of markdown files (`.md`, `.markdown`, `.txt`).
-
-```bash
-retrieve index ./data/slack-export --name slack
-```
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--name <name>` | Index name | Directory basename |
 
-Outputs JSON stats on completion: files processed, chunks created, embeddings cached.
-
-### `retrieve index-vision <pdf>`
+#### `retrieve index-vision <pdf>`
 
 Index a PDF using vision embeddings (ColQwen2.5 multi-vector).
-
-```bash
-retrieve index-vision ./recipes.pdf --name recipes --batch-size 4
-```
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--name <name>` | Index name | PDF filename (without `.pdf`) |
 | `--batch-size <n>` | Pages per embedding batch | `2` |
+| `--extract-text` | Also extract text for FTS search | off |
 
-### `retrieve search <query>`
+### Searching
+
+#### `retrieve search <query>`
 
 Search across one or more indexes.
-
-```bash
-retrieve search "quarterly OKRs" --index linear,notion --top-k 5 --json
-```
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -134,35 +154,68 @@ retrieve search "quarterly OKRs" --index linear,notion --top-k 5 --json
 | `--mode <mode>` | `text`, `vision`, or `hybrid` | `text` |
 | `--recency-weight <n>` | Recency weight (0 disables) | `0.15` |
 | `--half-life <days>` | Recency half-life in days | `90` |
+| `--filter <key=value>` | Metadata filter (repeatable) | none |
 | `--json` | Output as JSON | off |
 
-### `retrieve list`
+### Index management
+
+#### `retrieve list`
 
 List all available indexes with metadata.
 
-```bash
-retrieve list
-```
+#### `retrieve status <name>`
 
-### `retrieve status <name>`
+Show detailed status of an index.
 
-Show detailed status of an index (files, chunks, model, timestamps).
-
-```bash
-retrieve status slack
-```
-
-### `retrieve delete <name>`
+#### `retrieve delete <name>`
 
 Delete an index and its database file.
 
-```bash
-retrieve delete old-export
-```
+### Mirroring
+
+#### `retrieve mirror sync`
+
+Sync data from configured SaaS connectors.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--full` | Run full hydration instead of incremental | off |
+| `--adapter <name>` | Sync a specific connector only | all configured |
+| `--output <dir>` | Output directory | `./data` |
+
+#### `retrieve mirror status`
+
+Check last sync timestamp for all connectors.
+
+#### `retrieve mirror adapters`
+
+List which connectors are configured based on environment variables.
+
+#### `retrieve mirror daemon`
+
+Run as a long-lived daemon with periodic sync.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--interval <minutes>` | Minutes between sync cycles | `15` |
+| `--output <dir>` | Output directory | `./data` |
+
+## Connector setup
+
+Each connector activates automatically when its required environment variables are set. Only configure the connectors you need.
+
+| Connector | Required Env Vars | How to Get |
+|-----------|------------------|------------|
+| Slack | `SLACK_BOT_TOKEN` | Slack App > OAuth & Permissions > Bot Token. Scopes: `channels:history`, `channels:read`, `users:read` |
+| Notion | `NOTION_TOKEN` | Notion Settings > Integrations > Internal Integration. Share target pages with the integration. |
+| Linear | `LINEAR_API_KEY` | Linear Settings > API > Personal API Key |
+| Gmail | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Google Cloud Console > OAuth 2.0 Credentials |
+
+See `.env.example` for the full list of optional configuration variables.
 
 ## Supported index sources
 
-retrieval-skill is source-agnostic — it indexes any directory of markdown files. Timestamp extraction is built in for common export formats:
+retrieval-skill is source-agnostic — it indexes any directory of markdown files. Timestamp extraction is built in for common formats:
 
 | Source | Timestamp field | Format |
 |--------|----------------|--------|
@@ -172,11 +225,7 @@ retrieval-skill is source-agnostic — it indexes any directory of markdown file
 | Mono | `updated_at` | ISO 8601 |
 | Generic | `date`, `created`, `timestamp` | ISO 8601 or Unix |
 
-Timestamps power the recency boost — recent content scores higher in search results.
-
 ## Configuration
-
-All configuration is via environment variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -184,31 +233,6 @@ All configuration is via environment variables:
 | `VISION_BACKEND` | Vision backend: `torch` or `mlx` | `torch` |
 
 Index storage: `~/.retrieval-skill/indexes/` (one `.db` file per index).
-
-## How to add new adapters
-
-retrieval-skill uses a modular adapter pattern for embedding models. Each adapter implements:
-
-```javascript
-{
-  name: 'my-adapter',
-  type: 'text' | 'vision',
-  init: () => Promise<void>,
-  embedQuery: (query) => Promise<Float32Array | Float32Array[]>,
-  embedDocuments: (texts) => Promise<Float32Array[]>,     // text adapters
-  embedImages: (paths) => Promise<Float32Array[][]>,       // vision adapters
-  embeddingDim: () => number,
-  modelId: () => string,
-  dispose: () => Promise<void>,
-}
-```
-
-1. Create a new file in `src/adapters/` (e.g., `my-adapter.mjs`)
-2. Export a factory function that returns an adapter object
-3. Register it with `registerAdapter()` from `src/adapters/adapter.mjs`
-4. The adapter will be available via `getAdapter(name)` or `getAdaptersByType(type)`
-
-See `src/adapters/text-adapter.mjs` and `src/adapters/vision-adapter.mjs` for reference implementations.
 
 ## Search scoring
 

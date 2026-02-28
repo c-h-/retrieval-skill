@@ -1,7 +1,7 @@
 {
   "name": "retrieval-skill",
   "version": "1.0.0",
-  "description": "Generic retrieval system: incremental indexing + hybrid FTS5/cosine search with vision embedding support",
+  "description": "Organizational knowledge system: mirror SaaS data, incremental indexing, hybrid FTS5/cosine search with vision embedding support",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -24,7 +24,13 @@
     "hybrid-search",
     "vision-embeddings",
     "colbert",
-    "rag"
+    "rag",
+    "slack",
+    "notion",
+    "linear",
+    "gmail",
+    "saas-mirror",
+    "connectors"
   ],
   "engines": {
     "node": ">=18.0.0"
@@ -44,16 +50,29 @@
     "test:watch": "vitest",
     "lint": "biome check src/ __tests__/",
     "lint:fix": "biome check --write src/ __tests__/",
-    "format": "biome format --write src/ __tests__/"
+    "format": "biome format --write src/ __tests__/",
+    "mirror": "tsx src/connectors/core/cli.ts sync",
+    "mirror:full": "tsx src/connectors/core/cli.ts sync --full",
+    "mirror:status": "tsx src/connectors/core/cli.ts status",
+    "mirror:daemon": "tsx src/connectors/core/cli.ts daemon"
   },
   "dependencies": {
+    "@notionhq/client": "^2.0.0",
+    "@slack/web-api": "^7.0.0",
     "better-sqlite3": "^11.8.0",
     "commander": "^13.1.0",
+    "dotenv": "^16.4.0",
+    "googleapis": "^144.0.0",
+    "graphql": "^16.0.0",
+    "graphql-request": "^7.0.0",
     "sqlite-vec": "^0.1.7-alpha.2",
+    "turndown": "^7.2.0",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
     "vitest": "^3.0.0"
   }
 }

@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
+import { execFileSync } from 'child_process';
 import { Command } from 'commander';
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { deleteIndex, getIndexStatus, indexDirectory, listIndexes } from './index.mjs';
 import { formatResults, formatResultsJson, search } from './search.mjs';
 import { indexPdfVision } from './vision-index.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const program = new Command();
 
@@ -134,6 +138,61 @@ program
   .action((name) => {
     deleteIndex(name);
     console.log(`Index "${name}" deleted.`);
+  });
+
+// ─── Mirror commands (SaaS data connectors) ───
+
+function runMirrorCli(args) {
+  const cliPath = resolve(__dirname, 'connectors', 'core', 'cli.ts');
+  try {
+    execFileSync('npx', ['tsx', cliPath, ...args], {
+      stdio: 'inherit',
+      env: process.env,
+    });
+  } catch (err) {
+    if (err.status) process.exit(err.status);
+    throw err;
+  }
+}
+
+const mirror = program.command('mirror').description('Mirror SaaS data locally (Slack, Notion, Linear, Gmail)');
+
+mirror
+  .command('sync')
+  .description('Sync data from configured connectors')
+  .option('--full', 'Run full hydration instead of incremental')
+  .option('--adapter <name>', 'Sync a specific adapter only')
+  .option('--output <dir>', 'Output directory', './data')
+  .action((opts) => {
+    const args = ['sync'];
+    if (opts.full) args.push('--full');
+    if (opts.adapter) args.push('--adapter', opts.adapter);
+    if (opts.output) args.push('--output', opts.output);
+    runMirrorCli(args);
+  });
+
+mirror
+  .command('status')
+  .description('Check sync status for all connectors')
+  .option('--output <dir>', 'Output directory', './data')
+  .action((opts) => {
+    runMirrorCli(['status', '--output', opts.output]);
+  });
+
+mirror
+  .command('adapters')
+  .description('List available connectors based on configured credentials')
+  .action(() => {
+    runMirrorCli(['adapters']);
+  });
+
+mirror
+  .command('daemon')
+  .description('Run as a long-lived daemon with periodic sync')
+  .option('--interval <minutes>', 'Minutes between sync cycles', '15')
+  .option('--output <dir>', 'Output directory', './data')
+  .action((opts) => {
+    runMirrorCli(['daemon', '--interval', opts.interval, '--output', opts.output]);
   });
 
 program.parse();
