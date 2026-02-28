@@ -8,6 +8,7 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { runDoctor } from './doctor.mjs';
 import { deleteIndex, getIndexStatus, indexDirectory, listIndexes } from './index.mjs';
+import { stackDown, stackUp } from './stack.mjs';
 import { formatResults, formatResultsJson, search } from './search.mjs';
 import { indexPdfVision } from './vision-index.mjs';
 
@@ -150,6 +151,22 @@ program
   .description('Check the full retrieval stack health')
   .action(async () => {
     const ok = await runDoctor();
+    process.exit(ok ? 0 : 1);
+  });
+
+program
+  .command('up')
+  .description('Start the embedding server and sync scheduler')
+  .action(async () => {
+    const ok = await stackUp();
+    process.exit(ok ? 0 : 1);
+  });
+
+program
+  .command('down')
+  .description('Stop the embedding server and sync scheduler')
+  .action(async () => {
+    const ok = await stackDown();
     process.exit(ok ? 0 : 1);
   });
 
