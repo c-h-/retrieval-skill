@@ -50,10 +50,9 @@ else
   echo "$LOG_PREFIX Mirror sync completed with errors (continuing to indexing)"
 fi
 
-if ! curl -s -o /dev/null -w '%{http_code}' http://localhost:8100/v1/embeddings \
-  -X POST -H "Content-Type: application/json" \
-  -d '{"input":"healthcheck","model":"Octen-Embedding-8B"}' | grep -q "200"; then
-  echo "$LOG_PREFIX Skipping indexing (embedding server not running on :8100)"
+HEALTH=$(curl -s "http://localhost:8100/health?deep=true" 2>/dev/null)
+if ! echo "$HEALTH" | grep -q '"embed_check":"ok"'; then
+  echo "$LOG_PREFIX Skipping indexing (embedding server not healthy: $HEALTH)"
   exit 0
 fi
 
