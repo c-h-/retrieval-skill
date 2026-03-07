@@ -15,3 +15,5 @@ __pycache__/
 data-live/
 data-live-*/
 data-e2e-sample/
+data/
+src/ocr/venv/
