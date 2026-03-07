@@ -1,12 +1,13 @@
 /**
- * Embedding client — calls the local Octen-Embedding-8B MLX server
- * instead of running an in-process ONNX model.
+ * Embedding client — routes through Ohm proxy for unified routing,
+ * cost tracking, and failover to the local Octen-Embedding-8B MLX server.
  *
- * Server: http://localhost:8100/v1/embeddings (OpenAI-compatible)
+ * Default: http://localhost:4000/v1/embeddings (Ohm proxy → Octen)
+ * Fallback: set EMBEDDING_SERVER_URL=http://localhost:8100 for direct Octen access
  * Model:  Octen/Octen-Embedding-8B via MLX (4096-dim, last-token pooling)
  */
 
-const SERVER_URL = process.env.EMBEDDING_SERVER_URL || 'http://localhost:8100';
+const SERVER_URL = process.env.EMBEDDING_SERVER_URL || 'http://localhost:4000';
 const MODEL_ID = 'Octen/Octen-Embedding-8B';
 const EMBEDDING_DIM = 4096;
 
@@ -52,9 +53,15 @@ async function callServer(texts, retries = 3) {
  * No-op — the model lives on the server. Kept for API compatibility.
  */
 export async function loadModel(_opts = {}) {
-  // Verify the server is reachable
+  // Verify the server is reachable (Ohm at /health, Octen at /health)
   const res = await fetch(`${SERVER_URL}/health`);
   if (!res.ok) throw new Error(`Embedding server not healthy: ${res.status}`);
+  const body = await res.json().catch(() => ({}));
+  // Accept Ohm's {"status":"ok"} or Octen's {"status":"ok"/"healthy"}
+  const status = body?.status;
+  if (status && status !== 'ok' && status !== 'healthy') {
+    throw new Error(`Embedding server unhealthy: ${JSON.stringify(body)}`);
+  }
   return true;
 }
 

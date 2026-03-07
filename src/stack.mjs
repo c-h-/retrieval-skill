@@ -17,7 +17,7 @@ const OCTEN_PLIST_LABEL = process.env.OCTEN_PLIST_LABEL || 'com.openclaw.octen-e
 const RETRIEVAL_PLIST_LABEL = process.env.RETRIEVAL_PLIST_LABEL || 'com.retrieval-skill.sync';
 const OCTEN_PLIST_PATH = join(homedir(), 'Library', 'LaunchAgents', `${OCTEN_PLIST_LABEL}.plist`);
 const RETRIEVAL_PLIST_PATH = join(homedir(), 'Library', 'LaunchAgents', `${RETRIEVAL_PLIST_LABEL}.plist`);
-const EMBEDDING_SERVER_URL = process.env.EMBEDDING_SERVER_URL || 'http://localhost:8100';
+const EMBEDDING_SERVER_URL = process.env.EMBEDDING_SERVER_URL || 'http://localhost:4000';
 
 const BOLD = '\x1b[1m';
 const GREEN = '\x1b[32m';

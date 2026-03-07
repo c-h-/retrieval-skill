@@ -9,12 +9,13 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOCK_FILE="/tmp/retrieval-skill-sync.lock"
 LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
 
+# Build PATH — last entry prepended wins, so mise shims must be last
 for p in \
-  "$HOME/.local/share/mise/shims" \
-  "$HOME/.local/bin" \
-  "$HOME/.nvm/versions/node/"*/bin \
+  "/usr/local/bin" \
   "/opt/homebrew/bin" \
-  "/usr/local/bin"; do
+  "$HOME/.nvm/versions/node/"*/bin \
+  "$HOME/.local/bin" \
+  "$HOME/.local/share/mise/shims"; do
   [ -d "$p" ] && export PATH="$p:$PATH"
 done
 
@@ -50,13 +51,18 @@ else
   echo "$LOG_PREFIX Mirror sync completed with errors (continuing to indexing)"
 fi
 
-HEALTH=$(curl -s "http://localhost:8100/health?deep=true" 2>/dev/null)
-if ! echo "$HEALTH" | grep -q '"embed_check":"ok"'; then
+# Health check: accept Ohm's {"status":"ok"} or Octen's {"status":"ok"/"healthy"} or deep {"embed_check":"ok"}
+HEALTH=$(curl -s "http://localhost:4000/health" 2>/dev/null || curl -s "http://localhost:8100/health" 2>/dev/null)
+if echo "$HEALTH" | grep -qE '"status"\s*:\s*"(ok|healthy)"'; then
+  echo "$LOG_PREFIX Embedding server healthy (via Ohm or Octen)"
+elif echo "$HEALTH" | grep -q '"embed_check":"ok"'; then
+  echo "$LOG_PREFIX Embedding server healthy (deep check)"
+else
   echo "$LOG_PREFIX Skipping indexing (embedding server not healthy: $HEALTH)"
   exit 0
 fi
 
-for adapter in slack notion linear gog; do
+for adapter in slack notion linear; do
   ADAPTER_DIR="$OUTPUT_DIR/$adapter"
   if [ -d "$ADAPTER_DIR" ]; then
     INDEX_NAME="${INDEX_PREFIX}${adapter}"
