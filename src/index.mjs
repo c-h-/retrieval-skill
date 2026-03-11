@@ -22,6 +22,11 @@ export function indexDbPath(name) {
  * Supports incremental updates: only re-embeds changed files.
  */
 export async function indexDirectory(directory, name, _opts = {}) {
+  // Hard-fail if source directory doesn't exist — never prune against a nonexistent path
+  if (!existsSync(directory)) {
+    throw new Error(`Source directory does not exist: ${directory}`);
+  }
+
   const dbPath = indexDbPath(name);
   const db = openDb(dbPath);
   const modelId = getModelId();
@@ -213,6 +218,44 @@ export async function indexDirectory(directory, name, _opts = {}) {
   console.error(`\nDone: ${indexed} indexed, ${skipped} skipped, ${pruned} pruned, ${errors} errors`);
   console.error(`Total: ${totalFiles} files, ${totalChunks} chunks in index "${name}"`);
   return stats;
+}
+
+/**
+ * Reindex an existing index by name, using its stored source_directory.
+ */
+export async function reindexByName(name) {
+  const dbPath = indexDbPath(name);
+  if (!existsSync(dbPath)) {
+    throw new Error(`Index "${name}" does not exist`);
+  }
+  const db = openDb(dbPath);
+  const sourceDirectory = getMeta(db, 'source_directory');
+  db.close();
+  if (!sourceDirectory) {
+    throw new Error(`Index "${name}" has no stored source_directory`);
+  }
+  if (!existsSync(sourceDirectory)) {
+    throw new Error(`Source directory does not exist: ${sourceDirectory}`);
+  }
+  return indexDirectory(sourceDirectory, name);
+}
+
+/**
+ * Reindex all existing indexes.
+ */
+export async function reindexAll() {
+  const indexes = listIndexes();
+  const results = {};
+  for (const idx of indexes) {
+    console.error(`\nReindexing "${idx.name}"...`);
+    try {
+      results[idx.name] = await reindexByName(idx.name);
+    } catch (err) {
+      console.error(`Error reindexing "${idx.name}": ${err.message}`);
+      results[idx.name] = { error: err.message };
+    }
+  }
+  return results;
 }
 
 /**

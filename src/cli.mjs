@@ -2,12 +2,13 @@
 
 import 'dotenv/config';
 
+import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { Command } from 'commander';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { runDoctor } from './doctor.mjs';
-import { deleteIndex, getIndexStatus, indexDirectory, listIndexes } from './index.mjs';
+import { deleteIndex, getIndexStatus, indexDirectory, listIndexes, reindexAll, reindexByName } from './index.mjs';
 import { stackDown, stackUp } from './stack.mjs';
 import { formatResults, formatResultsJson, search } from './search.mjs';
 import { indexPdfVision } from './vision-index.mjs';
@@ -24,6 +25,10 @@ program
   .option('--name <name>', 'Index name (defaults to directory basename)')
   .action(async (directory, opts) => {
     const dir = resolve(directory);
+    if (!existsSync(dir)) {
+      console.error(`Error: directory does not exist: ${dir}`);
+      process.exit(1);
+    }
     const name = opts.name || dir.split('/').pop();
     console.error(`Indexing "${dir}" as "${name}"...`);
     const stats = await indexDirectory(dir, name);
@@ -49,6 +54,29 @@ program
     console.error(`Indexing "${pdfPath}" as "${name}" with vision embeddings...`);
     const stats = await indexPdfVision(pdfPath, name, { batchSize, extractText });
     console.log(JSON.stringify(stats, null, 2));
+  });
+
+program
+  .command('reindex [name]')
+  .description('Re-index using stored source_directory (no path needed)')
+  .option('--all', 'Reindex all existing indexes')
+  .action(async (name, opts) => {
+    if (opts.all) {
+      const results = await reindexAll();
+      console.log(JSON.stringify(results, null, 2));
+    } else if (name) {
+      try {
+        console.error(`Reindexing "${name}"...`);
+        const stats = await reindexByName(name);
+        console.log(JSON.stringify(stats, null, 2));
+      } catch (err) {
+        console.error(`Error: ${err.message}`);
+        process.exit(1);
+      }
+    } else {
+      console.error('Error: provide an index name or use --all');
+      process.exit(1);
+    }
   });
 
 program
