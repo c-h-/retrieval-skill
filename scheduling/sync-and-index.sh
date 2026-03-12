@@ -71,4 +71,13 @@ for adapter in slack notion linear; do
   fi
 done
 
+# Mono repo code index
+MONO_DIR="$HOME/code/mono"
+if [ -d "$MONO_DIR/.git" ]; then
+  echo "$LOG_PREFIX Pulling latest mono main..."
+  git -C "$MONO_DIR" pull --ff-only 2>&1 || echo "$LOG_PREFIX Warning: mono git pull failed"
+  echo "$LOG_PREFIX Indexing mono -> mono"
+  node src/cli.mjs index "$MONO_DIR" --name mono 2>&1 || echo "$LOG_PREFIX Warning: mono indexing failed"
+fi
+
 echo "$LOG_PREFIX Done"
