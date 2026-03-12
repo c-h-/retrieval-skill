@@ -87,10 +87,11 @@ export async function stackUp() {
       const venvActivate = join(OCTEN_SERVER_DIR, '.venv', 'bin', 'activate');
       if (existsSync(venvActivate)) {
         try {
-          execSync(
-            `cd "${OCTEN_SERVER_DIR}" && source .venv/bin/activate && python3 server.py &`,
-            { shell: '/bin/bash', stdio: 'ignore', detached: true },
-          );
+          execSync(`cd "${OCTEN_SERVER_DIR}" && source .venv/bin/activate && python3 server.py &`, {
+            shell: '/bin/bash',
+            stdio: 'ignore',
+            detached: true,
+          });
           log(`  Started server directly from ${OCTEN_SERVER_DIR}`);
         } catch {
           log(`  ${RED}Failed to start server from ${OCTEN_SERVER_DIR}${RESET}`);

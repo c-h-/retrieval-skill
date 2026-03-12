@@ -1,41 +1,85 @@
 import { createHash } from 'crypto';
 import { readdir, readFile, stat } from 'fs/promises';
-import { basename, extname, join } from 'path';
+import { extname, join } from 'path';
 
 const INDEXED_EXTENSIONS = new Set([
   // Docs / prose
-  '.md', '.markdown', '.txt', '.mdx',
+  '.md',
+  '.markdown',
+  '.txt',
+  '.mdx',
   // TypeScript / JavaScript
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
   // Python
   '.py',
   // Config
-  '.yaml', '.yml', '.json', '.toml', '.env.example',
+  '.yaml',
+  '.yml',
+  '.json',
+  '.toml',
+  '.env.example',
   // Infrastructure
-  '.tf', '.hcl', '.sh', '.bash',
+  '.tf',
+  '.hcl',
+  '.sh',
+  '.bash',
   // Web
-  '.css', '.scss', '.html',
+  '.css',
+  '.scss',
+  '.html',
   // Database / API
-  '.prisma', '.graphql', '.gql', '.sql',
+  '.prisma',
+  '.graphql',
+  '.gql',
+  '.sql',
   // Other
-  '.xml', '.csv', '.ini', '.cfg', '.conf', '.properties',
+  '.xml',
+  '.csv',
+  '.ini',
+  '.cfg',
+  '.conf',
+  '.properties',
 ]);
 
 /** Extensionless filenames that should be indexed. */
 const INDEXED_FILENAMES = new Set([
-  'Dockerfile', 'Makefile', '.gitignore', '.dockerignore', '.eslintrc', '.prettierrc',
+  'Dockerfile',
+  'Makefile',
+  '.gitignore',
+  '.dockerignore',
+  '.eslintrc',
+  '.prettierrc',
 ]);
 
 /** Lock files to always skip. */
 const SKIPPED_FILENAMES = new Set([
-  'yarn.lock', 'package-lock.json', 'pnpm-lock.yaml', 'bun.lockb',
-  'Gemfile.lock', 'poetry.lock', 'composer.lock',
+  'yarn.lock',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'bun.lockb',
+  'Gemfile.lock',
+  'poetry.lock',
+  'composer.lock',
 ]);
 
 /** Directories to skip during walk (in addition to _ and . prefixed dirs). */
 const SKIPPED_DIRS = new Set([
-  'node_modules', 'dist', 'build', '.next', '__generated__', 'generated',
-  'coverage', '.turbo', '.yarn', 'venv', '.venv',
+  'node_modules',
+  'dist',
+  'build',
+  '.next',
+  '__generated__',
+  'generated',
+  'coverage',
+  '.turbo',
+  '.yarn',
+  'venv',
+  '.venv',
 ]);
 
 /**
