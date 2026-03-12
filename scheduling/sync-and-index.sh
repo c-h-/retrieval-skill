@@ -71,4 +71,28 @@ for adapter in slack notion linear; do
   fi
 done
 
+# Git repo indexing
+# RETRIEVE_GIT_REPOS is a semicolon-separated list of name:path pairs.
+# Example: RETRIEVE_GIT_REPOS="mono:$HOME/code/mono;docs:$HOME/projects/docs"
+# Each repo is pulled (ff-only) and indexed under the given name.
+if [ -n "${RETRIEVE_GIT_REPOS:-}" ]; then
+  IFS=';' read -ra REPO_ENTRIES <<< "$RETRIEVE_GIT_REPOS"
+  for entry in "${REPO_ENTRIES[@]}"; do
+    REPO_NAME="${entry%%:*}"
+    REPO_PATH="${entry#*:}"
+    if [ -z "$REPO_NAME" ] || [ -z "$REPO_PATH" ]; then
+      echo "$LOG_PREFIX Warning: skipping malformed git repo entry '$entry' (expected name:path)"
+      continue
+    fi
+    if [ -d "$REPO_PATH/.git" ]; then
+      echo "$LOG_PREFIX Pulling latest $REPO_NAME..."
+      git -C "$REPO_PATH" pull --ff-only 2>&1 || echo "$LOG_PREFIX Warning: $REPO_NAME git pull failed"
+      echo "$LOG_PREFIX Indexing $REPO_NAME -> ${INDEX_PREFIX}${REPO_NAME}"
+      node src/cli.mjs index "$REPO_PATH" --name "${INDEX_PREFIX}${REPO_NAME}" 2>&1 || echo "$LOG_PREFIX Warning: $REPO_NAME indexing failed"
+    else
+      echo "$LOG_PREFIX Warning: $REPO_NAME path '$REPO_PATH' is not a git repo, skipping"
+    fi
+  done
+fi
+
 echo "$LOG_PREFIX Done"

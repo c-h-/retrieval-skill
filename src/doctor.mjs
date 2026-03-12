@@ -51,7 +51,7 @@ async function checkEmbeddingServer() {
       return { ok: true, msg: `Embedding server healthy at ${EMBEDDING_SERVER_URL}${extra}` };
     }
     return { ok: false, msg: `Embedding server status: ${status}` };
-  } catch (err) {
+  } catch (_err) {
     return { ok: false, msg: `Embedding server unreachable at ${EMBEDDING_SERVER_URL}` };
   }
 }
