@@ -2,15 +2,17 @@
 
 import 'dotenv/config';
 
-import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { Command } from 'commander';
+import { existsSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { runDoctor } from './doctor.mjs';
+import { checkEmbeddingServer, getIndexStaleness } from './health.mjs';
 import { deleteIndex, getIndexStatus, indexDirectory, listIndexes, reindexAll, reindexByName } from './index.mjs';
-import { stackDown, stackUp } from './stack.mjs';
+import { reindexAllWithRetry } from './reindex-with-retry.mjs';
 import { formatResults, formatResultsJson, search } from './search.mjs';
+import { stackDown, stackUp } from './stack.mjs';
 import { indexPdfVision } from './vision-index.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -251,6 +253,55 @@ mirror
   .option('--output <dir>', 'Output directory', './data')
   .action((opts) => {
     runMirrorCli(['daemon', '--interval', opts.interval, '--output', opts.output]);
+  });
+
+// ─── Automated ops ───
+
+program
+  .command('daily-reindex')
+  .description('Reindex all indexes with per-index retry and exponential backoff')
+  .option('--max-attempts <n>', 'Max retry attempts per index', '3')
+  .option('--indexes <list>', 'Comma-separated index names', 'slack,notion,linear,mono')
+  .action(async (opts) => {
+    const indexes = opts.indexes.split(',').map((s) => s.trim());
+    const maxAttempts = parseInt(opts.maxAttempts, 10);
+    const result = await reindexAllWithRetry({ indexes, maxAttempts });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.allOk ? 0 : 1);
+  });
+
+program
+  .command('health-check')
+  .description('Check embedding server health and index staleness')
+  .option('--threshold-hours <n>', 'Staleness threshold in hours', '48')
+  .option('--auto-fix', 'Reindex stale indexes when embedding server is healthy')
+  .action(async (opts) => {
+    const thresholdHours = parseFloat(opts.thresholdHours);
+    const server = await checkEmbeddingServer();
+    const indexes = getIndexStaleness({ thresholdHours });
+    const result = { server, indexes, autoFix: null };
+
+    const staleIndexes = indexes.filter((i) => i.stale);
+    const allHealthy = server.ok && staleIndexes.length === 0;
+
+    if (allHealthy || !opts.autoFix) {
+      console.log(JSON.stringify(result, null, 2));
+      process.exit(allHealthy ? 0 : 1);
+      return;
+    }
+
+    if (!server.ok) {
+      result.autoFix = { skipped: true, reason: 'embedding server unhealthy' };
+      console.log(JSON.stringify(result, null, 2));
+      process.exit(1);
+      return;
+    }
+
+    const fix = await reindexAllWithRetry({ indexes: staleIndexes.map((i) => i.name) });
+    result.autoFix = fix;
+    result.indexes = getIndexStaleness({ thresholdHours });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(fix.allOk ? 0 : 1);
   });
 
 program.parse();
