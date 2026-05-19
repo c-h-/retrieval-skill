@@ -262,6 +262,26 @@ Run as a long-lived daemon with periodic sync.
 | `--interval <minutes>` | Minutes between sync cycles | `15` |
 | `--output <dir>` | Output directory | `./data` |
 
+### Automated operations
+
+#### `retrieve daily-reindex`
+
+Reindex all four SaaS indexes (`slack`, `notion`, `linear`, `mono`) with per-index retry and exponential backoff. Each index gets an independent retry budget — a single index failing all attempts does not abort the others. Exits `0` if every index succeeded, `1` if any failed (making the cron DM condition trivial: `if exit≠0 DM Charlie`).
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--max-attempts <n>` | Max retry attempts per index | `3` |
+| `--indexes <list>` | Comma-separated index names | `slack,notion,linear,mono` |
+
+#### `retrieve health-check`
+
+Check the embedding server status and index staleness. Prints a JSON report of `{ server, indexes }`. With `--auto-fix`, automatically reindexes any stale index if the embedding server is healthy, then re-evaluates staleness. Exits `0` if everything is healthy or was successfully fixed; exits `1` if any index is stale and unfixable (server down) or if auto-fix failed.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--threshold-hours <n>` | Staleness threshold in hours | `48` |
+| `--auto-fix` | Reindex stale indexes when server is healthy | off |
+
 ### Stack management
 
 #### `retrieve doctor`
@@ -370,6 +390,13 @@ Scheduler output goes to `/tmp/retrieval-skill-sync.log`:
 ```bash
 tail -f /tmp/retrieval-skill-sync.log
 ```
+
+### Cron migration
+
+The previous cron setup ran `node src/cli.mjs reindex slack && ... && reindex mono` in a single shell — if any index failed mid-chain, the shell exited non-zero but the cron system reported success because earlier indexes had already printed output. After merging this PR, replace both cron jobs in `~/.openclaw/cron/jobs.json` with one-liners that delegate to the new subcommands:
+
+- **Daily reindex job**: change the prompt/command to `node /path/to/retrieval-skill/src/cli.mjs daily-reindex` (or `retrieve daily-reindex` if globally linked). The command exits `1` if any index ultimately fails after all retries, so your cron system's "notify on non-zero exit" DM will fire correctly for partial failures.
+- **Health alarm job**: change to `node /path/to/retrieval-skill/src/cli.mjs health-check --threshold-hours 48 --auto-fix`. With `--auto-fix`, a stale index is automatically reindexed if the embedding server is healthy; the job only exits `1` (and DMs you) when the situation is genuinely unrecoverable (server down, or retries exhausted).
 
 ## Search scoring
 
