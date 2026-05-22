@@ -9,13 +9,15 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOCK_FILE="/tmp/retrieval-skill-sync.lock"
 LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
 
-# Build PATH — last entry prepended wins, so mise shims must be last
+# Build PATH — last entry prepended wins, so it ends up first in $PATH.
+# /opt/homebrew/bin must be last so it takes priority (contains Node v25.x
+# that matches the compiled better-sqlite3 native module).
 for p in \
-  "/usr/local/bin" \
-  "/opt/homebrew/bin" \
-  "$HOME/.nvm/versions/node/"*/bin \
+  "$HOME/.local/share/mise/shims" \
   "$HOME/.local/bin" \
-  "$HOME/.local/share/mise/shims"; do
+  "$HOME/.nvm/versions/node/"*/bin \
+  "/usr/local/bin" \
+  "/opt/homebrew/bin"; do
   [ -d "$p" ] && export PATH="$p:$PATH"
 done
 
