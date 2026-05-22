@@ -2,15 +2,15 @@
 
 import 'dotenv/config';
 
-import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { Command } from 'commander';
+import { existsSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { runDoctor } from './doctor.mjs';
 import { deleteIndex, getIndexStatus, indexDirectory, listIndexes, reindexAll, reindexByName } from './index.mjs';
-import { stackDown, stackUp } from './stack.mjs';
 import { formatResults, formatResultsJson, search } from './search.mjs';
+import { stackDown, stackUp } from './stack.mjs';
 import { indexPdfVision } from './vision-index.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

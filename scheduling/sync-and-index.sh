@@ -9,13 +9,15 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOCK_FILE="/tmp/retrieval-skill-sync.lock"
 LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
 
-# Build PATH — last entry prepended wins, so mise shims must be last
+# Build PATH — last entry prepended wins, so it ends up first in $PATH.
+# /opt/homebrew/bin must be last so it takes priority (contains Node v25.x
+# that matches the compiled better-sqlite3 native module).
 for p in \
-  "/usr/local/bin" \
-  "/opt/homebrew/bin" \
-  "$HOME/.nvm/versions/node/"*/bin \
+  "$HOME/.local/share/mise/shims" \
   "$HOME/.local/bin" \
-  "$HOME/.local/share/mise/shims"; do
+  "$HOME/.nvm/versions/node/"*/bin \
+  "/usr/local/bin" \
+  "/opt/homebrew/bin"; do
   [ -d "$p" ] && export PATH="$p:$PATH"
 done
 
@@ -70,5 +72,29 @@ for adapter in slack notion linear; do
     node src/cli.mjs index "$ADAPTER_DIR" --name "$INDEX_NAME" 2>&1 || echo "$LOG_PREFIX Warning: $adapter indexing failed"
   fi
 done
+
+# Git repo indexing
+# RETRIEVE_GIT_REPOS is a semicolon-separated list of name:path pairs.
+# Example: RETRIEVE_GIT_REPOS="mono:$HOME/code/mono;docs:$HOME/projects/docs"
+# Each repo is pulled (ff-only) and indexed under the given name.
+if [ -n "${RETRIEVE_GIT_REPOS:-}" ]; then
+  IFS=';' read -ra REPO_ENTRIES <<< "$RETRIEVE_GIT_REPOS"
+  for entry in "${REPO_ENTRIES[@]}"; do
+    REPO_NAME="${entry%%:*}"
+    REPO_PATH="${entry#*:}"
+    if [ -z "$REPO_NAME" ] || [ -z "$REPO_PATH" ]; then
+      echo "$LOG_PREFIX Warning: skipping malformed git repo entry '$entry' (expected name:path)"
+      continue
+    fi
+    if [ -d "$REPO_PATH/.git" ]; then
+      echo "$LOG_PREFIX Pulling latest $REPO_NAME..."
+      git -C "$REPO_PATH" pull --ff-only 2>&1 || echo "$LOG_PREFIX Warning: $REPO_NAME git pull failed"
+      echo "$LOG_PREFIX Indexing $REPO_NAME -> ${INDEX_PREFIX}${REPO_NAME}"
+      node src/cli.mjs index "$REPO_PATH" --name "${INDEX_PREFIX}${REPO_NAME}" 2>&1 || echo "$LOG_PREFIX Warning: $REPO_NAME indexing failed"
+    else
+      echo "$LOG_PREFIX Warning: $REPO_NAME path '$REPO_PATH' is not a git repo, skipping"
+    fi
+  done
+fi
 
 echo "$LOG_PREFIX Done"

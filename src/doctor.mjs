@@ -51,8 +51,31 @@ async function checkEmbeddingServer() {
       return { ok: true, msg: `Embedding server healthy at ${EMBEDDING_SERVER_URL}${extra}` };
     }
     return { ok: false, msg: `Embedding server status: ${status}` };
-  } catch (err) {
+  } catch (_err) {
     return { ok: false, msg: `Embedding server unreachable at ${EMBEDDING_SERVER_URL}` };
+  }
+}
+
+// ── Check 1b: Native module compatibility ──
+
+function checkNativeModules() {
+  try {
+    // Attempt to load better-sqlite3 via a subprocess — if the native module was
+    // compiled for a different Node version, it throws ERR_DLOPEN_FAILED.
+    execSync(
+      `node -e "require('better-sqlite3')"`,
+      { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' }
+    );
+    return { ok: true, msg: `Native modules compatible (Node ${process.version}, MODULE_VERSION ${process.versions.modules})` };
+  } catch (err) {
+    const msg = (err.stderr || '') + (err.stdout || '') + (err.message || '');
+    if (msg.includes('NODE_MODULE_VERSION') || msg.includes('ERR_DLOPEN_FAILED')) {
+      return {
+        ok: false,
+        msg: `better-sqlite3 native module version mismatch — run: npm rebuild better-sqlite3\n       (Node ${process.version} MODULE_VERSION ${process.versions.modules})`,
+      };
+    }
+    return { ok: true, msg: `Native modules: could not verify (${err.message})` };
   }
 }
 
@@ -168,6 +191,7 @@ export async function runDoctor() {
 
   const checks = [
     { name: 'Embedding server', fn: checkEmbeddingServer },
+    { name: 'Native modules', fn: checkNativeModules },
     { name: 'Connectors', fn: checkConnectorCredentials },
     { name: 'Indexes', fn: checkIndexFreshness },
     { name: 'Disk space', fn: checkDiskSpace },
@@ -175,7 +199,7 @@ export async function runDoctor() {
   ];
 
   let allCriticalOk = true;
-  const criticalChecks = new Set(['Embedding server', 'Connectors']);
+  const criticalChecks = new Set(['Embedding server', 'Connectors', 'Native modules']);
 
   for (const check of checks) {
     const result = await check.fn();
