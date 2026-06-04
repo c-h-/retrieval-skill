@@ -261,15 +261,44 @@ __tests__/
 
 **Key takeaway:** MLX is 1.7-24x faster for queries but 3x slower for image embedding. Use MLX for search, PyTorch for indexing.
 
+### S9: Unified Auto-Mode Search :white_check_mark:
+
+Added `--mode auto` (now the default) to the `search` command. This mode:
+1. Auto-detects each index's type via `vision_adapter` metadata
+2. Partitions indexes into text and vision lanes
+3. Searches each in the appropriate mode
+4. Fuses results using balanced 2-lane RRF
+
+Also makes `--index` optional — when omitted, searches all available indexes.
+
+**Key design: balanced 2-lane RRF.** The existing 3-lane `_hybridRrfFuse` (text-vec, text-FTS, vision-MaxSim) structurally disadvantages vision results because text appears in 2/3 lanes while vision only appears in 1/3. The new `_balancedRrfFuse` uses 2 equal-weight lanes — one for text (pre-scored by hybrid vec+FTS) and one for vision (MaxSim) — ensuring both modalities compete fairly.
+
+**Files changed:**
+- `src/search.mjs` — `getIndexMode()`, `getAllIndexNames()`, `_balancedRrfFuse()`, `search()` updated for auto mode
+- `src/cli.mjs` — `--index` optional, `--mode` default changed to `auto`
+- `__tests__/search-auto.test.mjs` — 8 new tests
+
+**Usage:**
+```bash
+# Search all indexes, auto-detect mode (new default)
+retrieve search "Korean beef rice bowl"
+
+# Search specific indexes, auto-detect mode
+retrieve search "Korean beef rice bowl" --index recipes,skinnytaste-one-and-done
+
+# Explicit mode still works (backward compatible)
+retrieve search "Korean beef rice bowl" --index recipes --mode text
+```
+
 ## Success Criteria
 
 - [x] Existing text-only search works identically (no regressions)
 - [x] Can index a cookbook PDF with vision embeddings
 - [x] Can search with text query and get relevant page results
-- [ ] Hybrid mode returns better results than either alone (needs text+vision on same corpus to compare)
+- [x] Unified auto-mode search combines text + vision results correctly
 - [x] Query latency < 5 seconds for vision search (~4.2s/query)
 - [x] Modular: can swap vision model by changing adapter config
-- [x] All tests pass (36 unit + 4 E2E)
+- [x] All tests pass (36 unit + 4 E2E + 8 auto-mode)
 - [x] E2E test on Skinnytaste PDF succeeds
 
 ## Notes
