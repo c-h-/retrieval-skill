@@ -2,7 +2,7 @@ import { relative } from 'path';
 import { createVisionAdapter } from './adapters/vision-adapter.mjs';
 import { vecSearch } from './ann.mjs';
 import { embedQuery } from './embedder.mjs';
-import { indexDbPath } from './index.mjs';
+import { indexDbPath, listIndexes } from './index.mjs';
 import { getMeta, openDb } from './schema.mjs';
 import { searchVisionIndex } from './search/maxsim.mjs';
 
@@ -196,6 +196,43 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts
 }
 
 /**
+ * Detect the search mode for a named index by checking its metadata.
+ * Returns 'vision' if the index was created with vision embeddings,
+ * 'text' otherwise.
+ *
+ * @param {string} name - Index name
+ * @returns {'vision' | 'text'}
+ */
+export function getIndexMode(name) {
+  const dbPath = indexDbPath(name);
+  let db;
+  try {
+    db = openDb(dbPath, { vision: true });
+  } catch {
+    return 'text';
+  }
+  try {
+    const visionAdapter = getMeta(db, 'vision_adapter');
+    if (visionAdapter) return 'vision';
+    // Double-check: look for page_images rows even without metadata
+    const pageCount = db.prepare('SELECT COUNT(*) as cnt FROM page_images').get().cnt;
+    return pageCount > 0 ? 'vision' : 'text';
+  } catch {
+    return 'text';
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Get all available index names.
+ * @returns {string[]}
+ */
+export function getAllIndexNames() {
+  return listIndexes().map((idx) => idx.name);
+}
+
+/**
  * Search across one or more indexes.
  * indexNames: array of index names (e.g., ['linear', 'slack'])
  *
@@ -204,23 +241,54 @@ function searchIndex(db, queryEmbedding, query, topK, indexName, sourceDir, opts
  * @param {Object} opts
  * @param {number} opts.topK - default 10
  * @param {number} opts.threshold - default 0
- * @param {string} opts.mode - 'text' (default) | 'vision' | 'hybrid'
+ * @param {string} opts.mode - 'text' (default) | 'vision' | 'hybrid' | 'auto'
  * @param {Object} opts.filters - metadata key-value filters (e.g. { source: 'slack', status: 'open' })
  */
 export async function search(query, indexNames, opts = {}) {
   const topK = opts.topK || 10;
   const threshold = opts.threshold || 0;
-  const mode = opts.mode || 'text';
+  let mode = opts.mode || 'text';
   const recencyWeight = opts.recencyWeight ?? 0.15;
   const halfLifeDays = opts.halfLifeDays ?? 90;
   const filters = opts.filters || null;
+
+  // --- Auto mode: partition indexes by detected type ---
+  let textIndexNames = indexNames;
+  let visionIndexNames = [];
+
+  if (mode === 'auto') {
+    textIndexNames = [];
+    visionIndexNames = [];
+    for (const name of indexNames) {
+      const detected = getIndexMode(name);
+      if (detected === 'vision') {
+        visionIndexNames.push(name);
+      } else {
+        textIndexNames.push(name);
+      }
+    }
+    // Determine effective mode based on what we found
+    if (textIndexNames.length > 0 && visionIndexNames.length > 0) {
+      mode = 'hybrid';
+    } else if (visionIndexNames.length > 0) {
+      mode = 'vision';
+    } else {
+      mode = 'text';
+    }
+  } else if (mode === 'hybrid') {
+    // In explicit hybrid mode, all indexes get both lanes
+    visionIndexNames = indexNames;
+  } else if (mode === 'vision') {
+    visionIndexNames = indexNames;
+    textIndexNames = [];
+  }
 
   // --- Text lane ---
   const textResults = [];
   if (mode === 'text' || mode === 'hybrid') {
     const queryEmbedding = await embedQuery(query);
 
-    for (const name of indexNames) {
+    for (const name of textIndexNames) {
       const dbPath = indexDbPath(name);
       let db;
       try {
@@ -243,7 +311,7 @@ export async function search(query, indexNames, opts = {}) {
 
   // --- Vision lane ---
   const visionResults = [];
-  if (mode === 'vision' || mode === 'hybrid') {
+  if ((mode === 'vision' || mode === 'hybrid') && visionIndexNames.length > 0) {
     let visionAdapter = null;
     try {
       visionAdapter = createVisionAdapter();
@@ -251,7 +319,7 @@ export async function search(query, indexNames, opts = {}) {
 
       const queryVectors = await visionAdapter.embedQuery(query);
 
-      for (const name of indexNames) {
+      for (const name of visionIndexNames) {
         const dbPath = indexDbPath(name);
         let db;
         try {
@@ -310,8 +378,16 @@ export async function search(query, indexNames, opts = {}) {
     return visionResults.slice(0, topK).filter((r) => r.score >= threshold);
   }
 
-  // Hybrid mode: RRF fusion across text vector, text FTS, and vision lanes
-  return _hybridRrfFuse(textResults, visionResults, topK, threshold);
+  // Hybrid mode with vision results: use balanced 2-lane RRF
+  // (text results pre-ranked by hybrid score, vision results by MaxSim)
+  // This gives equal weight to both modalities regardless of how many
+  // indexes contribute to each lane.
+  if (visionResults.length > 0) {
+    return _balancedRrfFuse(textResults, visionResults, topK, threshold);
+  }
+
+  // Hybrid mode without vision results: fall back to text-only merge
+  return _mergeTextResults(textResults, topK, threshold);
 }
 
 /**
@@ -380,6 +456,58 @@ function _hybridRrfFuse(textResults, visionResults, topK, threshold) {
       ...item,
       rrfScore,
       score: rrfScore, // Override score with RRF for ranking
+    });
+  }
+
+  fused.sort((a, b) => b.rrfScore - a.rrfScore);
+  return fused.slice(0, topK).filter((r) => r.rrfScore >= threshold);
+}
+
+/**
+ * Balanced 2-lane RRF fusion for auto mode.
+ *
+ * Uses two equal-weight lanes so that text and vision results compete fairly:
+ *   Lane 1: All text results ranked by their hybrid score (vec+FTS already combined)
+ *   Lane 2: All vision results ranked by MaxSim score
+ *
+ * This avoids the structural disadvantage of 3-lane RRF where text results
+ * appear in 2 lanes (vec + FTS) while vision appears in only 1.
+ */
+function _balancedRrfFuse(textResults, visionResults, topK, threshold) {
+  const allItems = new Map();
+
+  // Deduplicate text results first
+  const seenText = new Set();
+  const dedupedText = [];
+  const textSorted = [...textResults].sort((a, b) => b.score - a.score);
+  for (const r of textSorted) {
+    const key = `text:${r.filePath}:${r.chunkIndex}`;
+    if (seenText.has(key)) continue;
+    seenText.add(key);
+    allItems.set(key, r);
+    dedupedText.push({ id: key });
+  }
+
+  // Lane 2: Vision results sorted by MaxSim score
+  const visionSorted = [...visionResults].sort((a, b) => b.score - a.score);
+  const visionList = visionSorted.map((r) => {
+    const id = `vision:${r.indexName}:${r.pageNumber}`;
+    allItems.set(id, r);
+    return { id };
+  });
+
+  // RRF fusion across 2 balanced lanes
+  const rrfScores = rrfFuse([dedupedText, visionList]);
+
+  // Build final results
+  const fused = [];
+  for (const [id, rrfScore] of rrfScores) {
+    const item = allItems.get(id);
+    if (!item) continue;
+    fused.push({
+      ...item,
+      rrfScore,
+      score: rrfScore,
     });
   }
 
