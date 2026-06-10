@@ -103,16 +103,44 @@ for adapter in slack notion linear; do
   fi
 done
 
+# ── Git-repo indexes (mono, etc.) ─────────────────────────────────────
+# RETRIEVE_GIT_REPOS (set in .env) is a comma-separated list of name:path entries,
+# e.g. "mono:$HOME/code/mono". These are local git checkouts indexed in place via
+# `reindex` (content-addressed, so unchanged files are skipped cheaply). Previously
+# this env var was DEAD config — nothing read it — which is why the mono index was
+# never refreshed by the scheduler and silently went stale (2026-06-10). Now wired up.
+GIT_REPOS="${RETRIEVE_GIT_REPOS:-}"
+GIT_INDEX_NAMES=()
+if [ -n "$GIT_REPOS" ]; then
+  IFS=',' read -ra _REPO_ENTRIES <<< "$GIT_REPOS"
+  for entry in "${_REPO_ENTRIES[@]}"; do
+    name="${entry%%:*}"; repo_path="${entry#*:}"
+    repo_path="$(eval echo "$repo_path")"   # expand $HOME etc.
+    [ -z "$name" ] && continue
+    GIT_INDEX_NAMES+=("$name")
+    if [ -d "$repo_path" ]; then
+      echo "$LOG_PREFIX Reindexing git repo $name ($repo_path)"
+      if ! node src/cli.mjs reindex "$name" 2>&1; then
+        echo "$LOG_PREFIX ❌ ERROR: $name reindex FAILED"
+        FAILED_ADAPTERS+=("$name")
+      fi
+    else
+      echo "$LOG_PREFIX ⚠ git repo path missing for $name: $repo_path (skipping)"
+    fi
+  done
+fi
+
 # ── Loud failure + staleness summary ─────────────────────────────────────
 # Surfaces silent failures: if any tracked index is >24h stale OR an adapter
 # errored this run, print a clearly-greppable banner so the problem is visible
 # in the log (and to any future staleness monitor) instead of failing quietly.
 echo "$LOG_PREFIX === Index freshness ==="
-node -e '
+TRACKED_LIST="slack notion linear ${GIT_INDEX_NAMES[*]:-}"
+RETRIEVAL_TRACKED="$TRACKED_LIST" node -e '
   const Database = require("better-sqlite3");
   const os = require("os"), path = require("path");
   const idxDir = path.join(os.homedir(), ".retrieval-skill", "indexes");
-  const tracked = ["slack", "notion", "linear"];
+  const tracked = (process.env.RETRIEVAL_TRACKED || "slack notion linear").trim().split(/\s+/).filter(Boolean);
   const STALE_MS = 24 * 3600 * 1000;
   let stale = [];
   for (const n of tracked) {
