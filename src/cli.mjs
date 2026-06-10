@@ -2,15 +2,15 @@
 
 import 'dotenv/config';
 
-import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { Command } from 'commander';
+import { existsSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { runDoctor } from './doctor.mjs';
 import { deleteIndex, getIndexStatus, indexDirectory, listIndexes, reindexAll, reindexByName } from './index.mjs';
+import { formatResults, formatResultsJson, getAllIndexNames, search } from './search.mjs';
 import { stackDown, stackUp } from './stack.mjs';
-import { formatResults, formatResultsJson, search } from './search.mjs';
 import { indexPdfVision } from './vision-index.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -81,11 +81,11 @@ program
 
 program
   .command('search <query>')
-  .description('Search across one or more indexes')
-  .requiredOption('--index <names>', 'Comma-separated index names')
+  .description('Search across one or more indexes (searches all indexes in auto mode when --index is omitted)')
+  .option('--index <names>', 'Comma-separated index names (default: all indexes)')
   .option('--top-k <n>', 'Number of results', '10')
   .option('--threshold <score>', 'Minimum score threshold', '0')
-  .option('--mode <mode>', 'Search mode: text (default), vision, hybrid', 'text')
+  .option('--mode <mode>', 'Search mode: auto (default), text, vision, hybrid', 'auto')
   .option('--recency-weight <n>', 'Recency weight (0 to disable, default 0.15)', '0.15')
   .option('--half-life <days>', 'Recency half-life in days (default 90)', '90')
   .option(
@@ -99,7 +99,17 @@ program
   )
   .option('--json', 'Output as JSON')
   .action(async (query, opts) => {
-    const indexNames = opts.index.split(',').map((s) => s.trim());
+    let indexNames;
+    if (opts.index) {
+      indexNames = opts.index.split(',').map((s) => s.trim());
+    } else {
+      indexNames = getAllIndexNames();
+      if (indexNames.length === 0) {
+        console.error('No indexes found. Run `retrieve index` or `retrieve index-vision` first.');
+        process.exit(1);
+      }
+      console.error(`Searching all ${indexNames.length} indexes...`);
+    }
     const topK = parseInt(opts.topK, 10);
     const threshold = parseFloat(opts.threshold);
     const mode = opts.mode;

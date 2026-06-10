@@ -14,7 +14,12 @@ const EMBEDDING_DIM = 4096;
 /**
  * Call the embedding server. Returns array of Float32Array embeddings.
  */
-async function callServer(texts, retries = 3) {
+// Retry on transient server-side failures too, not just socket errors. A single
+// HTTP 500/503 from an overloaded embed server (e.g. MLX server contended by
+// other workloads) previously aborted an entire multi-thousand-file index run
+// (2026-06-10 mono reindex died on one 500). 429/5xx are transient — back off
+// and retry instead of failing the whole job.
+async function callServer(texts, retries = 5) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const res = await fetch(`${SERVER_URL}/v1/embeddings`, {
@@ -24,20 +29,33 @@ async function callServer(texts, retries = 3) {
       });
       if (!res.ok) {
         const body = await res.text();
-        throw new Error(`Embedding server error (${res.status}): ${body}`);
+        const err = new Error(`Embedding server error (${res.status}): ${body}`);
+        err.httpStatus = res.status;
+        // Honor Retry-After when present (seconds or HTTP-date → seconds).
+        const ra = res.headers.get('retry-after');
+        if (ra) {
+          const secs = /^\d+$/.test(ra) ? Number(ra) : Math.max(0, (Date.parse(ra) - Date.now()) / 1000);
+          if (Number.isFinite(secs)) err.retryAfterMs = secs * 1000;
+        }
+        throw err;
       }
       const json = await res.json();
       const sorted = json.data.sort((a, b) => a.index - b.index);
       return sorted.map((d) => new Float32Array(d.embedding));
     } catch (err) {
-      if (
-        attempt < retries &&
-        (err.code === 'UND_ERR_SOCKET' ||
-          err.cause?.code === 'UND_ERR_SOCKET' ||
-          err.message.includes('socket') ||
-          err.message.includes('ECONNRESET'))
-      ) {
-        const delay = attempt * 2000;
+      const isSocket =
+        err.code === 'UND_ERR_SOCKET' ||
+        err.cause?.code === 'UND_ERR_SOCKET' ||
+        err.message.includes('socket') ||
+        err.message.includes('ECONNRESET') ||
+        err.name === 'TimeoutError' ||
+        err.message.includes('fetch failed');
+      // Transient HTTP: 429 (rate limit) + 5xx (server overload/restart).
+      const isTransientHttp = err.httpStatus === 429 || (err.httpStatus >= 500 && err.httpStatus <= 599);
+      if (attempt < retries && (isSocket || isTransientHttp)) {
+        // Exponential backoff (2s, 4s, 8s, 16s…), capped, honoring Retry-After.
+        const backoff = Math.min(2000 * 2 ** (attempt - 1), 30000);
+        const delay = err.retryAfterMs ?? backoff;
         console.error(
           `Embedding request failed (attempt ${attempt}/${retries}), retrying in ${delay}ms: ${err.message}`,
         );
